@@ -285,23 +285,14 @@ func simulate(c *Content, sc scenario, horizon int, seed int64) simResult {
 	return res
 }
 
-// priorKnowledge: the ideas a learner knows before starting — a section or
-// level band together with everything below it in the track graph, so the
-// knowledge is downward closed as a real learner's roughly is.
+// priorKnowledge: the ideas a learner knows before starting — every level-1
+// idea (level ≥ 2: also level-2) with everything below it, so the knowledge
+// is downward closed as a real learner's roughly is.
 func priorKnowledge(c *Content, ideas []FIREIdea, level int) map[string]bool {
-	section := map[string]string{}
-	for _, s := range c.Sections["math"] {
-		for _, t := range s.Topics {
-			for _, code := range t.Ideas {
-				section[code] = s.Name
-			}
-		}
-	}
 	g := NewPlacementGraph(ideas)
 	knows := map[string]bool{}
 	for n, i := range ideas {
-		sec := section[i.Code]
-		if strings.HasPrefix(sec, "Школьная") || (level >= 2 && i.Level == 1 && (sec == "Линейная алгебра" || sec == "Вероятность и статистика")) {
+		if c.Ideas[i.Code].Level <= level-0 && c.Ideas[i.Code].Level < 3 && (level >= 2 || c.Ideas[i.Code].Level == 1) {
 			for j, code := range g.Codes {
 				if g.below[n].has(j) {
 					knows[code] = true
@@ -316,9 +307,13 @@ func TestSimulate(t *testing.T) {
 	if os.Getenv("SIM") == "" {
 		t.Skip("set SIM=1 to run the learning simulator")
 	}
-	c, err := LoadContent("../data/content.db")
-	if err != nil {
-		t.Fatal(err)
+	dir := os.Getenv("SIM_PACKS") // default: the repo's packs/
+	if dir == "" {
+		dir = "../packs"
+	}
+	c, _ := LoadPacks(dir)
+	if len(c.Ideas) == 0 {
+		t.Skip("no packs in " + dir)
 	}
 	strong := learner{"сильный", 0.92, 1.4}
 	average := learner{"средний", 0.82, 1.0}
@@ -334,8 +329,6 @@ func TestSimulate(t *testing.T) {
 		scenario{Program: "all", Goal: 120, L: average, Alpha: 1, Cap: 5, Place: 1},
 		scenario{Program: "all", Goal: 120, L: average, Alpha: 1, Cap: 5, Place: 2},
 		scenario{Program: "all", Goal: 120, L: weak, Alpha: 1, Cap: 5, Place: 2},
-		scenario{Program: "math", Goal: 120, L: average, Alpha: 1, Cap: 5},
-		scenario{Program: "math", Goal: 120, L: average, Alpha: 1, Cap: 5, Place: 2},
 	)
 	horizon := 540
 	var b strings.Builder

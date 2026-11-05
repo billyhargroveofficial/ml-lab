@@ -5,48 +5,50 @@ import { Collapse, motion, Seg, soft } from '../ui/motion';
 import { PinButton } from '../ui/Pin';
 
 export function ProgramPage() {
-  const [program, setProgram] = useState<'ml' | 'math'>(() => new URLSearchParams(location.search).get('program') === 'math' ? 'math' : 'ml');
+  const { packs } = useSession();
+  const [chosen, setChosen] = useState(() => new URLSearchParams(location.search).get('program') ?? '');
+  const program = packs.some(p => p.id === chosen) ? chosen : packs[0]?.id ?? '';
   const [q, setQ] = useState('');
-  const [opened, setOpened] = useState<Set<string>>(() => new Set());
-  const { me: session } = useSession();
-  const ml = useApi<Program>('/program/ml'), mathP = useApi<Program>('/program/math');
-  const outline = program === 'ml' ? ml : mathP;
-  const me = useApi<Me>(session ? `/me?track=${program === 'math' ? 'math' : 'all'}` : null);
+  const [toggled, setToggled] = useState<Set<string>>(() => new Set());
+  const outline = useApi<Program>(program ? `/program/${program}` : null);
+  const me = useApi<Me>(program ? `/me?track=${program}` : null);
   const mem = useMemo(() => new Map(me.data?.ideas.map(i => [i.code, i]) ?? []), [me.data]);
   const now = Date.now();
   const status = (code: string) => { const x = mem.get(code); return x?.due_at && new Date(x.due_at).getTime() <= now ? 'due' : x?.status; };
   const needle = q.trim().toLowerCase();
-  const o = outline.data;
+  const o = outline.data?.program === program ? outline.data : undefined;
+  const topics = o?.sections.flatMap(s => s.topics) ?? [];
+  const openByDefault = topics.length <= 6;
+  const choose = (p: string) => { setChosen(p); setToggled(new Set()); history.replaceState(null, '', `?program=${p}`); };
+  const items: [string, string][] = packs.map(p => [p.id, p.title]);
   return <div className="wrap page">
     <div className="page-head">
-      <div><h1>Программа</h1><div className="stack" style={{ marginTop: 6 }}>
-        <p className="muted" style={{ margin: 0 }} data-on={program === 'ml' || undefined}>{ml.data ? Object.keys(ml.data.ideas).length : 427} ML-идей по разделам и темам.</p>
-        <p className="muted" style={{ margin: 0 }} data-on={program === 'math' || undefined}>{mathP.data ? Object.keys(mathP.data.ideas).length : 634} тем математики, на которых стоит ML.</p>
-      </div></div>
+      <div><h1>Программа</h1><p className="muted" style={{ margin: '6px 0 0' }}>{o ? `${Object.keys(o.ideas).length} уроков в ${topics.length} ${topics.length === 1 ? 'теме' : 'темах'}.` : packs.length ? '' : 'Пакетов пока нет — см. «как это работает».'}</p></div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <Seg big label="Программа" value={program} items={[['ml', 'ML'], ['math', 'Математика']]} onChange={p => { setProgram(p); history.replaceState(null, '', `?program=${p}`); }} />
-        {o && <button className="btn" style={{ minWidth: 150 }} onClick={() => setOpened(opened.size ? new Set() : new Set(o.sections.map(x => x.id)))}>{opened.size ? 'свернуть всё' : 'развернуть всё'}</button>}
+        {packs.length > 1 && (packs.length <= 4 ? <Seg big label="Пакет" value={program} items={items} onChange={choose} />
+          : <select value={program} onChange={e => choose(e.target.value)} aria-label="Пакет">{items.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>)}
+        {o && topics.length > 1 && <button className="btn" style={{ minWidth: 150 }} onClick={() => setToggled(toggled.size ? new Set() : new Set(topics.map(t => t.id)))}>{toggled.size ? 'как было' : openByDefault ? 'свернуть всё' : 'развернуть всё'}</button>}
         <input type="search" placeholder="поиск…" value={q} onChange={e => setQ(e.target.value)} style={{ width: 200 }} aria-label="Поиск по программе" />
       </div>
     </div>
-    {session && <p className="legend" style={{ marginTop: -6, marginBottom: 14 }}><span><i style={{ background: 'var(--good)' }} />выучено</span><span><i style={{ background: 'var(--warn)' }} />пора повторить / начато</span></p>}
-    {!o ? <p className="skel">загрузка программы</p> : o.sections.map((s, si) => {
-      const topics = s.topics.map(t => ({ ...t, ideas: t.ideas.filter(c => !needle || o.ideas[c].name.toLowerCase().includes(needle) || t.name.toLowerCase().includes(needle)) })).filter(t => t.ideas.length);
-      if (!topics.length) return null;
-      const all = topics.flatMap(t => t.ideas);
-      const learned = all.filter(c => status(c) === 'learned').length;
-      const open = !!needle || opened.has(s.id);
-      const toggle = () => { if (!needle) setOpened(o => { const n = new Set(o); if (n.has(s.id)) n.delete(s.id); else n.add(s.id); return n; }); };
-      return <motion.section className="sec panel" key={`${program}:${s.id}`} data-open={open || undefined} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ ...soft, delay: si * 0.03 }} layout="position">
-        <button type="button" className="sec-head" aria-expanded={open} onClick={toggle}>
-          <motion.span className="chev" aria-hidden="true" animate={{ rotate: open ? 90 : 0 }} transition={soft}>›</motion.span>
-          <span className="sec-title"><h3>{s.name}</h3>{s.description && <p>{s.description}</p>}</span>
-          <span className="num">{session ? `${learned}/` : ''}{all.length} · {topics.length} тем</span>
-        </button>
+    <p className="legend" style={{ marginTop: -6, marginBottom: 14 }}><span><i style={{ background: 'var(--good)' }} />выучено</span><span><i style={{ background: 'var(--warn)' }} />пора повторить / начато</span></p>
+    {program && !o ? <p className="skel">загрузка программы</p> : topics.map((t, ti) => {
+      const ideas = t.ideas.filter(c => !needle || o!.ideas[c].name.toLowerCase().includes(needle) || t.name.toLowerCase().includes(needle));
+      if (!ideas.length) return null;
+      const learned = ideas.filter(c => status(c) === 'learned').length;
+      const open = !!needle || (openByDefault !== toggled.has(t.id));
+      const toggle = () => { if (!needle) setToggled(s => { const n = new Set(s); if (n.has(t.id)) n.delete(t.id); else n.add(t.id); return n; }); };
+      return <motion.section className="sec panel" key={`${program}:${t.id}`} data-open={open || undefined} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ ...soft, delay: Math.min(ti, 12) * 0.03 }} layout="position">
+        <div className="sec-row">
+          <button type="button" className="sec-head" aria-expanded={open} onClick={toggle}>
+            <motion.span className="chev" aria-hidden="true" animate={{ rotate: open ? 90 : 0 }} transition={soft}>›</motion.span>
+            <span className="sec-title"><h3>{t.name}</h3>{t.definition && <p>{t.definition}</p>}</span>
+            <span className="num">{learned}/{ideas.length}</span>
+          </button>
+          <PinButton code={t.id} label="↑ первой" compact learned={t.ideas.every(c => status(c) === 'learned')} />
+        </div>
         <Collapse open={open}>
-          {topics.map((t, ti) => <motion.div className="tp" key={t.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ ...soft, delay: Math.min(ti, 12) * 0.025 }}><div className="tp-name"><b>{t.name}</b>{session && <PinButton code={t.id} label="↑ первой" compact learned={t.ideas.every(c => status(c) === 'learned')} />}</div><div className="chips">{t.ideas.map(c => <Link key={c} to={`/idea/${c}`} className="chip" data-s={status(c)}>
-            <span>{o.ideas[c].name}</span>
-          </Link>)}</div></motion.div>)}
+          <div className="chips" style={{ padding: '4px 0 2px' }}>{ideas.map(c => <Link key={c} to={`/idea/${c}`} className="chip" data-s={status(c)}><span>{o!.ideas[c].name}</span></Link>)}</div>
         </Collapse>
       </motion.section>;
     })}

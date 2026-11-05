@@ -1,9 +1,10 @@
+# Your own packs and progress stay on your machine.
+packs/*
+!packs/README.md
+data/
+bin/
 node_modules/
 web/dist/
-bin/
-data/content.db
-data/users.db*
+web/tsconfig.tsbuildinfo
 *.log
 .DS_Store
-deploy.local/
-web/tsconfig.tsbuildinfo

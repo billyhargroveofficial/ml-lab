@@ -14,9 +14,9 @@ import (
 	_ "time/tzdata"
 )
 
-var moscow, _ = time.LoadLocation("Europe/Moscow")
+// Days are counted in the learner's own time zone.
 
-func dayOf(t time.Time) string { return t.In(moscow).Format("2006-01-02") }
+func dayOf(t time.Time) string { return t.Local().Format("2006-01-02") }
 
 func rnd() float64 {
 	var b [8]byte

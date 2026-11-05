@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 
-export const BASE = '/ml/api/v1';
+export const BASE = '/api/v1';
 
-export type Track = 'all' | 'ml' | 'math';
+// "all" or a pack id.
+export type Track = string;
 export type Kind = 'lesson' | 'review' | 'quiz';
 
 export interface MemoryView { code: string; status: 'new' | 'partial' | 'learned'; rep: number; memory_now: number; due_at: string | null }
@@ -18,28 +19,21 @@ export interface Attempt { id: number; kind: Kind; code?: string; title: string;
 export interface AttemptResult { correct: number; total: number; xp: number; passed: boolean; perfect: boolean; implicit: { code: string; title: string; delta: number }[] }
 export interface AnswerView { correct: boolean; correct_index: number; explanation?: string; done: boolean; next?: PublicQuestion; result?: AttemptResult }
 export interface HistoryItem { kind: Kind; code?: string; title: string; finished_at: string; correct: number; total: number; xp: number; passed: boolean }
-export interface Leader { rank: number; name: string; xp: number; week_xp: number; learned_ml: number; learned_math: number; me?: boolean }
+export interface PackInfo { id: string; title: string; description?: string; language?: string; ideas: number; topics: number }
+export interface Info { packs: PackInfo[]; ideas: number }
+export interface PackStatus { id: string; title: string; dir: string; ideas: number; topics: number; loaded: boolean; errors?: string[]; warnings?: string[] }
 
 export interface Topic { id: string; section_id: string; code?: string; name: string; definition?: string; ideas: string[] }
 export interface Section { id: string; program: string; name: string; description?: string; topics: Topic[] }
-export interface ProgramIdea { code: string; name: string; level: number; weight: number }
-export interface Program { program: 'ml' | 'math'; sections: Section[]; ideas: Record<string, ProgramIdea> }
+export interface ProgramIdea { code: string; name: string; level: number }
+export interface Program { program: string; title: string; sections: Section[]; ideas: Record<string, ProgramIdea> }
 
 export interface Edge { code: string; key: boolean; encompassing: number; kind: 'prerequisite' | 'implicit'; source: string }
 export interface Idea {
-  code: string; id: string; program: 'ml' | 'math'; topic_id: string; name: string; definition?: string; level: number; weight: number;
+  code: string; id: string; program: string; topic_id: string; name: string; definition?: string; level: number; weight: number;
   lesson?: string;
   questions?: { question: string; options: string[]; correct: number; explanation?: string }[];
   prerequisites: Edge[]; encompassed_by: Edge[];
-}
-
-export interface Stats {
-  generated_at: string; users: number; active_7d: number; active_30d: number; attempts: number; lessons_passed: number; xp: number;
-  daily: { date: string; learners: number; attempts: number; xp: number }[];
-  learned_histogram: { label: string; count: number }[];
-  sections: { program: string; name: string; attempts: number; pass_rate: number }[];
-  hardest_ideas: { code: string; name: string; attempts: number; pass_rate: number }[];
-  implicit: { explicit_reviews: number; implicit_credits: number }; min_sample: number;
 }
 
 export class ApiError extends Error { constructor(public status: number, message: string) { super(message); } }
@@ -47,7 +41,7 @@ export class ApiError extends Error { constructor(public status: number, message
 export async function api<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const res = await fetch(BASE + path, {
     method: body === undefined ? 'GET' : 'POST',
-    headers: body === undefined ? {} : { 'Content-Type': 'application/json', 'X-Requested-With': 'mllab' },
+    headers: body === undefined ? {} : { 'Content-Type': 'application/json', 'X-Requested-With': 'fire' },
     body: body === undefined ? undefined : JSON.stringify(body),
     credentials: 'same-origin',
     signal,

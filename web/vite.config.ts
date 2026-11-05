@@ -2,10 +2,11 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig({
-  base: '/ml/',
+  base: '/',
   plugins: [react()],
   server: {
+    host: '127.0.0.1',
     port: 5190,
-    proxy: { '/ml/api': 'http://127.0.0.1:17490', '/ml/data': 'http://127.0.0.1:17490' },
+    proxy: { '/api': 'http://127.0.0.1:17490' },
   },
 });

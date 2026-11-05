@@ -318,3 +318,14 @@ input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border-radius: 
 .linkbtn { background: none; border: 0; padding: 10px 0 0; font: inherit; font-size: 12px; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
 .linkbtn:hover { color: var(--fg); }
 @media (max-width: 560px) { .placecard { flex-direction: column; align-items: stretch; } }
+
+.sec-row { display: flex; align-items: center; gap: 10px; padding-right: 14px; }
+.sec-row .sec-head { flex: 1; }
+.sec[data-open] > .sec-row { border-bottom: 1px solid var(--line); }
+.sec .chips { padding: 12px 16px !important; }
+.picker { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; }
+select { font: inherit; font-size: 12px; height: 30px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
+.packrow { border-top: 1px dashed var(--line); padding: 12px 0; }
+.packrow:first-child { border-top: 0; }
+.packrow ul { margin: 6px 0 0; padding-left: 18px; font-size: 12px; }
+.packrow .err { color: var(--bad, #c92a2a); }

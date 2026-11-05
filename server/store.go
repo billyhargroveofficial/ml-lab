@@ -2,22 +2,19 @@ package main
 
 import (
 	"context"
-	"crypto/pbkdf2"
-	"crypto/rand"
-	"crypto/sha256"
-	"crypto/subtle"
 	"database/sql"
-	"encoding/base64"
-	"encoding/hex"
-	"errors"
-	"strings"
+	"encoding/json"
+	"fmt"
+	"io"
 	"time"
 )
 
+// Progress of the one local learner. Tables keep a user_id column (always
+// localUser) so the schema stays compatible with older databases.
+const localUser int64 = 1
+
 const schema = `
 PRAGMA journal_mode=WAL;
-CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE, pass TEXT NOT NULL, created_at INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS memory(user_id INTEGER NOT NULL, code TEXT NOT NULL, status TEXT NOT NULL, rep REAL NOT NULL, memory REAL NOT NULL,
   interval REAL NOT NULL, speed REAL NOT NULL, accuracy REAL NOT NULL, last_review INTEGER, due INTEGER, PRIMARY KEY(user_id, code));
 CREATE TABLE IF NOT EXISTS attempts(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, kind TEXT NOT NULL, code TEXT, started_at INTEGER NOT NULL,
@@ -30,7 +27,7 @@ CREATE TABLE IF NOT EXISTS pins(user_id INTEGER PRIMARY KEY, code TEXT NOT NULL,
 type Store struct{ db *sql.DB }
 
 func OpenStore(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)")
+	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, err
 	}
@@ -43,94 +40,6 @@ func OpenStore(path string) (*Store, error) {
 		return nil, err
 	}
 	return &Store{db}, nil
-}
-
-var (
-	errNameTaken = errors.New("name taken")
-	errBadLogin  = errors.New("bad login")
-)
-
-func hashPassword(pass string) string {
-	salt := make([]byte, 16)
-	_, _ = rand.Read(salt)
-	key, _ := pbkdf2.Key(sha256.New, pass, salt, 200_000, 32)
-	return "pbkdf2$" + base64.RawStdEncoding.EncodeToString(salt) + "$" + base64.RawStdEncoding.EncodeToString(key)
-}
-
-func checkPassword(stored, pass string) bool {
-	parts := strings.Split(stored, "$")
-	if len(parts) != 3 {
-		return false
-	}
-	salt, err1 := base64.RawStdEncoding.DecodeString(parts[1])
-	want, err2 := base64.RawStdEncoding.DecodeString(parts[2])
-	if err1 != nil || err2 != nil {
-		return false
-	}
-	key, _ := pbkdf2.Key(sha256.New, pass, salt, 200_000, 32)
-	return subtle.ConstantTimeCompare(key, want) == 1
-}
-
-func (s *Store) Register(ctx context.Context, name, pass string) (int64, error) {
-	res, err := s.db.ExecContext(ctx, `INSERT INTO users(name, pass, created_at) VALUES(?,?,?)`, name, hashPassword(pass), time.Now().Unix())
-	if err != nil {
-		if strings.Contains(err.Error(), "UNIQUE") {
-			return 0, errNameTaken
-		}
-		return 0, err
-	}
-	return res.LastInsertId()
-}
-
-func (s *Store) Login(ctx context.Context, name, pass string) (int64, error) {
-	var id int64
-	var stored string
-	if err := s.db.QueryRowContext(ctx, `SELECT id, pass FROM users WHERE name=?`, name).Scan(&id, &stored); err != nil {
-		return 0, errBadLogin
-	}
-	if !checkPassword(stored, pass) {
-		return 0, errBadLogin
-	}
-	return id, nil
-}
-
-const sessionTTL = 180 * 24 * time.Hour
-
-func (s *Store) NewSession(ctx context.Context, user int64) (string, error) {
-	raw := make([]byte, 32)
-	_, _ = rand.Read(raw)
-	token := hex.EncodeToString(raw)
-	sum := sha256.Sum256([]byte(token))
-	_, err := s.db.ExecContext(ctx, `INSERT INTO sessions VALUES(?,?,?)`, hex.EncodeToString(sum[:]), user, time.Now().Add(sessionTTL).Unix())
-	return token, err
-}
-
-func (s *Store) SessionUser(ctx context.Context, token string) (int64, string, bool) {
-	sum := sha256.Sum256([]byte(token))
-	var id int64
-	var name string
-	err := s.db.QueryRowContext(ctx, `SELECT u.id, u.name FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires_at>?`, hex.EncodeToString(sum[:]), time.Now().Unix()).Scan(&id, &name)
-	return id, name, err == nil
-}
-
-// DeleteUser removes the account and everything tied to it.
-func (s *Store) DeleteUser(ctx context.Context, id int64) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	for _, q := range []string{`DELETE FROM sessions WHERE user_id=?`, `DELETE FROM memory WHERE user_id=?`, `DELETE FROM attempts WHERE user_id=?`, `DELETE FROM xp_state WHERE user_id=?`, `DELETE FROM pins WHERE user_id=?`, `DELETE FROM users WHERE id=?`} {
-		if _, err := tx.ExecContext(ctx, q, id); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
-}
-
-func (s *Store) DropSession(ctx context.Context, token string) {
-	sum := sha256.Sum256([]byte(token))
-	_, _ = s.db.ExecContext(ctx, `DELETE FROM sessions WHERE token=?`, hex.EncodeToString(sum[:]))
 }
 
 func unix(t time.Time) any {
@@ -220,29 +129,113 @@ func migrateFSRS(db *sql.DB) error {
 	return nil
 }
 
-// Forget drops progress and goals on ideas the content no longer has (the
-// math program was cut to what ML stands on), so they do not linger.
-func (s *Store) Forget(known map[string]*Idea) (int, error) {
-	rows, err := s.db.Query(`SELECT DISTINCT code FROM memory UNION SELECT code FROM pins`)
+// ProgressFormat names the export file format; keep it backward compatible.
+const ProgressFormat = "fire-progress-v1"
+
+var progressTables = []string{"memory", "attempts", "xp_state", "pins"}
+
+// Export writes the whole local progress as JSON: rows of every table.
+func (s *Store) Export(ctx context.Context, w io.Writer) error {
+	out := map[string]any{"format": ProgressFormat, "exported_at": time.Now().UTC().Format(time.RFC3339)}
+	for _, t := range progressTables {
+		rows, err := s.db.QueryContext(ctx, "SELECT * FROM "+t+" WHERE user_id=?", localUser)
+		if err != nil {
+			return err
+		}
+		cols, _ := rows.Columns()
+		list := []map[string]any{}
+		for rows.Next() {
+			vals := make([]any, len(cols))
+			ptrs := make([]any, len(cols))
+			for i := range vals {
+				ptrs[i] = &vals[i]
+			}
+			if err := rows.Scan(ptrs...); err != nil {
+				rows.Close()
+				return err
+			}
+			row := map[string]any{}
+			for i, c := range cols {
+				if b, ok := vals[i].([]byte); ok {
+					vals[i] = string(b)
+				}
+				row[c] = vals[i]
+			}
+			list = append(list, row)
+		}
+		rows.Close()
+		out[t] = list
+	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", " ")
+	return enc.Encode(out)
+}
+
+// Import replaces the local progress with an export, in one transaction.
+func (s *Store) Import(ctx context.Context, r io.Reader) error {
+	var in map[string]json.RawMessage
+	if err := json.NewDecoder(r).Decode(&in); err != nil {
+		return fmt.Errorf("not JSON: %w", err)
+	}
+	var format string
+	_ = json.Unmarshal(in["format"], &format)
+	if format != ProgressFormat {
+		return fmt.Errorf("format %q, want %q", format, ProgressFormat)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, err
+		return err
 	}
-	var gone []string
-	for rows.Next() {
-		var code string
-		_ = rows.Scan(&code)
-		if known[code] == nil {
-			gone = append(gone, code)
+	defer tx.Rollback()
+	for _, t := range progressTables {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM "+t); err != nil {
+			return err
+		}
+		var rows []map[string]any
+		if raw, ok := in[t]; ok {
+			if err := json.Unmarshal(raw, &rows); err != nil {
+				return fmt.Errorf("%s: %w", t, err)
+			}
+		}
+		for _, row := range rows {
+			row["user_id"] = localUser
+			cols, marks, vals := "", "", []any{}
+			for k, v := range row {
+				if !safeColumn(k) {
+					return fmt.Errorf("%s: bad column %q", t, k)
+				}
+				if cols != "" {
+					cols, marks = cols+",", marks+","
+				}
+				cols, marks = cols+k, marks+"?"
+				vals = append(vals, v)
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO "+t+"("+cols+") VALUES("+marks+")", vals...); err != nil {
+				return fmt.Errorf("%s: %w", t, err)
+			}
 		}
 	}
-	rows.Close()
-	for _, code := range gone {
-		if _, err := s.db.Exec(`DELETE FROM memory WHERE code=?`, code); err != nil {
-			return 0, err
-		}
-		if _, err := s.db.Exec(`DELETE FROM pins WHERE code=?`, code); err != nil {
-			return 0, err
+	return tx.Commit()
+}
+
+func safeColumn(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if !(r == '_' || r >= 'a' && r <= 'z') {
+			return false
 		}
 	}
-	return len(gone), nil
+	return true
+}
+
+// Reset forgets all progress.
+func (s *Store) Reset(ctx context.Context) error {
+	for _, t := range progressTables {
+		if _, err := s.db.ExecContext(ctx, "DELETE FROM "+t); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -1,15 +1,12 @@
 import { useMemo, useState, type CSSProperties } from 'react';
-import { useApi, type HistoryItem, type Leader, type Me, type Program, type Task } from '../api';
+import { useApi, type HistoryItem, type Me, type PackInfo, type Program, type Task } from '../api';
 import { Link, useSession } from '../App';
-import { Auth } from '../ui/Auth';
 import { Session } from '../ui/Session';
 import { Placement } from '../ui/Placement';
 import { fmt, LineChart, Ring } from '../ui/charts';
 import { AnimatePresence, Grow, motion, Num, Panel, Seg, soft, spring } from '../ui/motion';
 import { lessons, setPin } from '../ui/Pin';
 
-type Prog = 'all' | 'ml' | 'math';
-const progs: Prog[] = ['all', 'ml', 'math'];
 const DAY = 864e5;
 const plural = (n: number, one: string, few: string, many: string) => { const a = n % 10, b = n % 100; return a === 1 && b !== 11 ? one : a >= 2 && a <= 4 && (b < 12 || b > 14) ? few : many; };
 const longDate = (d: Date) => d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' }).replace(' г.', '');
@@ -19,83 +16,66 @@ const icon: Record<Task['kind'], string> = { lesson: '+', review: '↻', quiz: '
 const kindText: Record<Task['kind'], string> = { lesson: 'урок', review: 'повторение', quiz: 'проверка' };
 
 export function Dashboard() {
-  const { me: session, guest, loading } = useSession();
-  const [program, setProgramState] = useState<Prog>(() => { const p = new URLSearchParams(location.search).get('program') ?? store.get('track', 'all'); return progs.includes(p as Prog) ? p as Prog : 'all'; });
+  const { packs, loading } = useSession();
+  const [chosen, setProgramState] = useState<string>(() => new URLSearchParams(location.search).get('program') ?? store.get('track', 'all'));
+  const program = chosen === 'all' || packs.some(p => p.id === chosen) || !packs.length ? chosen : 'all';
   const [goal, setGoalState] = useState(() => Number(store.get('goal', '60')) || 60);
   const [task, setTask] = useState<{ kind: Task['kind']; code?: string; n: number }>();
   const [placing, setPlacing] = useState(false);
-  const setProgram = (p: Prog) => { setProgramState(p); store.set('track', p); };
+  const setProgram = (p: string) => { setProgramState(p); store.set('track', p); };
   const setGoal = (g: number) => { setGoalState(g); store.set('goal', String(g)); };
   const track = program;
-  const authed = !!session;
 
-  const outline = useApi<Program>(`/program/${program === 'math' ? 'math' : 'ml'}`);
-  const me = useApi<Me>(authed ? `/me?track=${track}` : null);
-  const next = useApi<Task[]>(authed ? `/next?track=${track}` : null);
-  const history = useApi<HistoryItem[]>(authed ? '/history' : null);
-  const [period, setPeriod] = useState<'all' | 'week'>('all');
-  const leaders = useApi<Leader[]>(`/leaders?period=${period}`);
+  const outline = useApi<Program>(program !== 'all' && packs.some(p => p.id === program) ? `/program/${program}` : null);
+  const me = useApi<Me>(`/me?track=${track}`);
+  const next = useApi<Task[]>(`/next?track=${track}`);
+  const history = useApi<HistoryItem[]>('/history');
   const m = me.data;
+  const current = packs.find(p => p.id === program);
+  const empty = !loading && packs.length === 0;
 
   const openNext = () => { const t = next.data?.[0]; setTask(t ? { kind: t.kind, code: t.code, n: Date.now() } : undefined); };
-  const failed = outline.error || (authed && (me.error || next.error));
+  const failed = me.error || next.error;
 
   return <div className="wrap">
     <section className="hero">
       <div>
-        <motion.h1 initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={soft}>ML Lab<motion.span animate={{ opacity: [1, 0, 1] }} transition={{ duration: 1.1, repeat: Infinity, ease: 'linear' }}>_</motion.span></motion.h1>
-        <div className="stack">
-          <motion.p animate={{ opacity: program === 'all' ? 1 : 0, y: program === 'all' ? 0 : -4 }} transition={soft} data-on={program === 'all' || undefined}>427 идей машинного обучения и 634 темы математики, на которых они стоят. Математика приходит прямо перед идеей, которой нужна; решая сложное, повторяешь простое.</motion.p>
-          <motion.p animate={{ opacity: program === 'ml' ? 1 : 0, y: program === 'ml' ? 0 : 4 }} transition={soft} data-on={program === 'ml' || undefined}>Только машинное обучение — 427 идей, от метрик и деревьев до трансформеров и LLM, без уроков математики. Для тех, у кого математика уже есть.</motion.p>
-          <motion.p animate={{ opacity: program === 'math' ? 1 : 0, y: program === 'math' ? 0 : 4 }} transition={soft} data-on={program === 'math' || undefined}>Только математика — 634 темы, на которых стоит ML: функции и анализ, линейная алгебра, вероятность, статистика и оптимизация. Ничего сверх того, что нужно.</motion.p>
-        </div>
+        <motion.h1 initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={soft}>FIRe Lab<motion.span animate={{ opacity: [1, 0, 1] }} transition={{ duration: 1.1, repeat: Infinity, ease: 'linear' }}>_</motion.span></motion.h1>
+        <AnimatePresence mode="wait" initial={false}><motion.p key={program} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={soft}>
+          {current ? (current.description || `${current.title}: ${current.ideas} ${plural(current.ideas, 'урок', 'урока', 'уроков')}.`) : packs.length ? `Все ваши пакеты вместе: ${packs.reduce((n, p) => n + p.ideas, 0)} уроков. Решая сложное, повторяешь простое — FIRe засчитывает повторение тем внутри задачи.` : 'Интервальное повторение по графу знаний. Темы добавляет ваш агент: попросите его составить уроки, и они появятся здесь.'}
+        </motion.p></AnimatePresence>
       </div>
-      <div className="controls">
-        <Seg big label="Программа" value={program} items={[['all', 'ML + математика'], ['ml', 'ML'], ['math', 'математика']]} onChange={setProgram} />
-      </div>
+      {packs.length > 0 && <div className="controls"><TrackPicker packs={packs} value={program} onChange={setProgram} /></div>}
     </section>
 
     {failed && <p className="alert" role="alert">Не удалось загрузить часть данных. <button className="btn small" onClick={() => location.reload()}>Повторить</button></p>}
 
     <motion.div className="kpis" aria-label="Ваш прогресс" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={soft}>
-      <div><strong className={m || guest ? '' : 'skel'}><Num value={m?.learned ?? 0} />/{m?.total ?? (guest ? 0 : '000')}</strong><span>выучено</span></div>
-      <div><strong className={m || guest ? '' : 'skel'}><Num value={m ? m.learned / Math.max(1, m.total) * 100 : 0} format={v => `${fmt(v, 1)}%`} /></strong><span>программы</span></div>
-      <div><strong className={m || guest ? '' : 'skel'}><Num value={m?.due ?? 0} /></strong><span>пора повторить</span></div>
-      <div><strong className={m || guest ? '' : 'skel'}><Num value={m?.xp ?? 0} /></strong><span>XP</span></div>
+      <div><strong className={m ? '' : 'skel'}><Num value={m?.learned ?? 0} />/{m?.total ?? '000'}</strong><span>выучено</span></div>
+      <div><strong className={m ? '' : 'skel'}><Num value={m ? m.learned / Math.max(1, m.total) * 100 : 0} format={v => `${fmt(v, 1)}%`} /></strong><span>программы</span></div>
+      <div><strong className={m ? '' : 'skel'}><Num value={m?.due ?? 0} /></strong><span>пора повторить</span></div>
+      <div><strong className={m ? '' : 'skel'}><Num value={m?.xp ?? 0} /></strong><span>XP</span></div>
     </motion.div>
 
     <div className="grid">
       <div className="col">
         <Panel order={1} aria-label="Сегодня">
           <div className="phead"><h2>Сегодня</h2>{m && <span>{m.xp_to_quiz > 0 ? `до проверки ${m.xp_to_quiz} XP` : 'проверка доступна'}</span>}</div>
-          {guest && !loading ? <div className="intro">
-            <ul>
-              <li><b>{fmt(427, 0)} ML-идей</b> — у каждой урок и 3–6 вопросов с разбором.</li>
-              <li><b>{fmt(634, 0)} темы математики</b> — только те, на которых стоит ML: от производных до SVD, оптимизации и статистики.</li>
-              <li><b>Вступительный тест</b> отметит то, что вы уже знаете, — программа станет короче.</li>
-              <li><b>FIRe</b>: составные задачи засчитывают повторение мелких — меньше повторений, тот же результат.</li>
-              <li>XP, дневная цель, серия дней и дата, к которой вы пройдёте программу.</li>
-            </ul>
-            <Auth />
-          </div> : <>
-            {m && m.learned < m.total * 0.05 && <motion.div className="placecard" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={soft}>
-              <div><b>{program === 'ml' ? 'Уже знаете часть ML?' : 'Уже знаете часть математики?'}</b><p className="muted">Вступительный тест — до 48 вопросов, минут 15. Отметит, что вы уже знаете, и программа станет короче.</p></div>
+          {empty ? <Empty /> : <>
+            {m && m.total >= 20 && m.learned < m.total * 0.05 && <motion.div className="placecard" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={soft}>
+              <div><b>Что-то из этого уже знаете?</b><p className="muted">Вступительный тест — до 48 вопросов. Отметит то, что вы уже знаете, и программа станет короче.</p></div>
               <button className="btn primary" onClick={() => setPlacing(true)}>пройти тест</button>
             </motion.div>}
             <Feed tasks={next.data} loading={!next.data} onOpen={t => setTask({ kind: t.kind, code: t.code, n: Date.now() })} done={!!m && m.learned >= m.total} />
-            {m && m.learned >= m.total * 0.05 && <button className="linkbtn muted" onClick={() => setPlacing(true)}>вступительный тест ↗</button>}
+            {m && m.total >= 20 && m.learned >= m.total * 0.05 && <button className="linkbtn muted" onClick={() => setPlacing(true)}>вступительный тест ↗</button>}
           </>}
         </Panel>
-        {authed && <Panel order={2} aria-label="История"><div className="phead"><h2>История</h2><span>последние задания</span></div><History items={history.data} /></Panel>}
+        {!empty && <Panel order={2} aria-label="История"><div className="phead"><h2>История</h2><span>последние задания</span></div><History items={history.data} /></Panel>}
       </div>
 
       <aside className="col">
-        <Panel order={2} aria-label="Прогноз"><ForecastPanel me={m} guest={guest} goal={goal} onGoal={setGoal} /></Panel>
-        <Panel order={3} aria-label="Темы"><Topics outline={outline.data} me={m} /></Panel>
-        <Panel order={4} aria-label="Топ учеников">
-          <div className="phead"><h2>Топ</h2><Seg label="Период" value={period} items={[['all', 'всё время'], ['week', '7 дней']]} onChange={setPeriod} /></div>
-          <Leaders rows={leaders.data} period={period} />
-        </Panel>
+        <Panel order={2} aria-label="Прогноз"><ForecastPanel me={m} goal={goal} onGoal={setGoal} /></Panel>
+        {!empty && <Panel order={3} aria-label="Темы"><Topics program={program} packs={packs} outline={outline.data} me={m} /></Panel>}
       </aside>
     </div>
     <AnimatePresence>{placing && <Placement key="placement" track={track} onClose={() => setPlacing(false)} />}</AnimatePresence>
@@ -130,7 +110,7 @@ function History({ items }: { items?: HistoryItem[] }) {
   </div>)}</div>;
 }
 
-function ForecastPanel({ me, guest, goal, onGoal }: { me?: Me; guest: boolean; goal: number; onGoal: (g: number) => void }) {
+function ForecastPanel({ me, goal, onGoal }: { me?: Me; goal: number; onGoal: (g: number) => void }) {
   const now = Date.now();
   let streak = 0;
   if (me) for (let i = me.days.length - 1 - (me.days.at(-1)?.xp ? 0 : 1); i >= 0 && me.days[i].xp > 0; i--) streak++;
@@ -154,44 +134,53 @@ function ForecastPanel({ me, guest, goal, onGoal }: { me?: Me; guest: boolean; g
     </div>}
     <div className="phead"><h2>Прогноз</h2>{me && <span>{Math.round(me.learned / Math.max(1, me.total) * 100)}% тем</span>}</div>
     {me && burn.length > 0 && <LineChart label="Накопленный XP и план" series={burn} height={110} xFormat={v => v <= 0 ? `${-Math.round(v)} дн. назад` : `через ${Math.round(v)} дн.`} yFormat={v => `${fmt(v, 0)}`} xTicks={[{ x: 0, label: 'сегодня' }]} />}
-    {guest && <p className="muted" style={{ fontSize: 12 }}>Войдите, чтобы увидеть даты при своём темпе.</p>}
     <label className="pace">
       <span>Цель — <b>{goal} XP</b> в день</span>
       <input type="range" min={10} max={150} step={10} value={goal} aria-label="Дневная цель, XP" style={{ '--fill': `${(goal - 10) / 140 * 100}%` } as CSSProperties} onChange={e => onGoal(Number(e.target.value))} />
     </label>
-    {end && <motion.dl className="milestones" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={soft}>
+    {end && me!.total > 0 && <motion.dl className="milestones" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={soft}>
       <div><dt>осталось</dt><dd><Num value={me!.forecast.all.remaining_xp} format={v => `${fmt(Math.round(v), 0)} XP`} /></dd></div>
       <div><dt>вся программа</dt><dd><AnimatePresence mode="wait" initial={false}><motion.span key={longDate(end)} style={{ display: 'inline-block' }} initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 6 }} transition={{ duration: 0.15 }}>{longDate(end)}</motion.span></AnimatePresence></dd></div>
     </motion.dl>}
   </>;
 }
 
-function Topics({ outline, me }: { outline?: Program; me?: Me }) {
+function TrackPicker({ packs, value, onChange }: { packs: PackInfo[]; value: string; onChange: (v: string) => void }) {
+  const items: [string, string][] = [['all', 'все пакеты'], ...packs.map(p => [p.id, p.title] as [string, string])];
+  if (packs.length <= 3) return <Seg big label="Программа" value={value} items={items} onChange={onChange} />;
+  return <label className="picker"><span className="muted">программа</span>
+    <select value={value} onChange={e => onChange(e.target.value)} aria-label="Программа">{items.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+  </label>;
+}
+
+function Empty() {
+  return <div className="intro">
+    <p style={{ marginTop: 0 }}><b>Пакетов пока нет.</b> Пакет — это тема из нескольких уроков с задачами: папка <code>packs/&lt;id&gt;/</code> в этом репозитории.</p>
+    <ul>
+      <li>Попросите агента в этой папке (Claude Code, Codex, любой другой): <i>«составь мне 5 уроков по кванторам, от простого к сложному»</i>. Инструкции для него — в <code>AGENTS.md</code>.</li>
+      <li>Или скопируйте пример: <code>cp -r examples/packs/softmax packs/</code>.</li>
+      <li>Приложение подхватит новый пакет само через пару секунд.</li>
+    </ul>
+    <p className="muted" style={{ marginBottom: 0 }}>Подробнее — на странице <Link to="/docs">как это работает</Link>.</p>
+  </div>;
+}
+
+function Topics({ program, packs, outline, me }: { program: string; packs: PackInfo[]; outline?: Program; me?: Me }) {
   const mem = useMemo(() => new Map(me?.ideas.map(i => [i.code, i]) ?? []), [me]);
   const now = Date.now();
-  const rows = outline?.sections.map(s => {
-    const codes = s.topics.flatMap(t => t.ideas);
-    const learned = codes.filter(c => mem.get(c)?.status === 'learned').length;
-    const due = codes.filter(c => { const x = mem.get(c); return x?.due_at && new Date(x.due_at).getTime() <= now; }).length;
-    return { id: s.id, name: s.name, total: codes.length, learned, due };
-  }) ?? [];
+  const count = (codes: string[]) => ({
+    learned: codes.filter(c => mem.get(c)?.status === 'learned').length,
+    due: codes.filter(c => { const x = mem.get(c); return x?.due_at && new Date(x.due_at).getTime() <= now; }).length,
+  });
+  const byPack = program === 'all';
+  const rows = byPack
+    ? packs.map(p => { const codes = [...mem.keys()].filter(c => c.startsWith(p.id + '.')); return { id: p.id, name: p.title, total: p.ideas, link: `/program?program=${p.id}`, ...count(codes) }; })
+    : outline?.sections.flatMap(s => s.topics).map(t => ({ id: t.id, name: t.name, total: t.ideas.length, link: `/program?program=${program}`, ...count(t.ideas) })) ?? [];
   return <>
-    <div className="phead"><h2>Разделы</h2><Link to={`/program?program=${outline?.program ?? 'ml'}`} className="muted">карта →</Link></div>
-    {!outline ? <p className="skel">загрузка</p> : <div className="topics">{rows.map((r, i) => <motion.div className="topic" key={r.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.02 }}>
+    <div className="phead"><h2>{byPack ? 'Пакеты' : 'Темы'}</h2><Link to={`/program${byPack ? '' : `?program=${program}`}`} className="muted">карта →</Link></div>
+    {!byPack && !outline ? <p className="skel">загрузка</p> : <div className="topics">{rows.map((r, i) => <motion.div className="topic" key={r.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.02 }}>
       <span title={r.name}>{r.name}</span><span className="num">{r.learned}/{r.total}</span>
-      <span className="meter"><Grow width={(r.learned - r.due) / r.total * 100} /><Grow className="due" width={r.due / r.total * 100} /></span>
+      <span className="meter"><Grow width={(r.learned - r.due) / Math.max(1, r.total) * 100} /><Grow className="due" width={r.due / Math.max(1, r.total) * 100} /></span>
     </motion.div>)}</div>}
   </>;
 }
-
-function Leaders({ rows, period }: { rows?: Leader[]; period: 'all' | 'week' }) {
-  if (!rows) return <p className="skel">загрузка</p>;
-  if (!rows.length) return <p className="empty">Пока пусто — станьте первым.</p>;
-  return <table className="leaders">
-    <thead><tr><th>#</th><th>ник</th><th>XP</th><th>ML</th><th>мат</th></tr></thead>
-    <tbody>{rows.map((r, i) => <motion.tr layout key={r.name} className={r.me ? 'me' : undefined} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ ...spring, delay: i * 0.03 }}>
-      <td>{r.rank}</td><td className="n">{r.name}</td><td><Num value={period === 'week' ? r.week_xp : r.xp} /></td><td>{r.learned_ml}</td><td>{r.learned_math}</td>
-    </motion.tr>)}</tbody>
-  </table>;
-}
-

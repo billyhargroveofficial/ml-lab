@@ -1,44 +1,71 @@
-# ML Lab
+# FIRe Lab
 
-Open trainer for machine learning and math: **427 ML ideas** from metrics and trees
-to transformers and LLMs, and **634 math topics** (only the math the ML ideas stand on) from functions and calculus to SVD, convex
-optimisation and statistics. Every idea has a lesson and 3–6 multiple-choice
-questions. Memory is modelled with FSRS-6 (default parameters of
-[py-fsrs](https://github.com/open-spaced-repetition/py-fsrs), MIT; review when
-recall drops below 90%), and on top of it runs FIRe (Fractional Implicit Repetition,
-from *The Math Academy Way*): solving a composite task counts as a partial review
-of the simpler topics it contains, weighted by `encompassing` edges set by Codex.
+A local spaced-repetition app that schedules lessons and reviews over a **knowledge graph**, with content written by your own coding agent.
 
-Live: https://billyhargrove.ru/ml · API docs: https://billyhargrove.ru/ml/docs
+- **FSRS-6** models memory: each learned idea has a stability and a difficulty, and comes back for review when recall drops below 90%.
+- **FIRe** (fractional implicit repetition, from Justin Skycak's *The Math Academy Way*) counts a solved lesson as partial review of the simpler ideas it contains, weighted by `encompassing` links. You repeat less and keep the same recall. Implicit credit is capped, so ideas that live only on it still get explicit checks.
+- **A placement test** marks what you already know with a few dozen questions. It works like a binary search over the graph.
+- **No curriculum is included.** Content is *packs*: folders in `packs/` with lessons in Markdown + KaTeX and multiple-choice questions with explanations. You ask an agent for a topic, and it writes, links and validates the pack. The app picks it up within seconds.
+- **No accounts, no server.** Progress is stored in `data/progress.db` on your machine. You can export and import it.
 
-## What is open
+## Run
 
-- `data/source/*.json` — the program bundles and the Codex weights;
-- `data/content.db` — the same as one read-only SQLite file (built by `tools/build_content.py`,
-  downloadable at `/ml/data/content.db`);
-- a keyless JSON API at `/ml/api/v1` (program, ideas with answers, graph,
-  leaderboard, anonymized stats).
+You need Go 1.25+ and Node.js 20+.
 
-Code is MIT, content is CC BY 4.0 (`data/LICENSE.md`).
+```sh
+git clone https://github.com/billyhargroveofficial/ml-lab.git && cd ml-lab
+./fire dev            # Windows: fire dev
+```
+
+Open http://127.0.0.1:5190. The first run installs the web dependencies.
+
+## Add a topic
+
+Open the folder in Claude Code, Codex, Cursor or any agent that reads `AGENTS.md`, and ask in your own words, for example:
+
+> I struggle to read quantifiers. Make me 6 lessons with 5–7 problems each, from trivial to brutal.
+
+The agent follows [`.agents/skills/add-topic`](.agents/skills/add-topic/SKILL.md):
+
+1. It finds existing ideas to link to with `./fire search`.
+2. It writes `packs/<id>/pack.json` in the format described in [`docs/pack-format.md`](docs/pack-format.md).
+3. It sets the weights by the rubric.
+4. It runs `./fire validate` until the pack has no errors.
+
+`packs/` is git-ignored, so your topics stay yours.
+
+No terminal? Give a chat assistant `docs/pack-format.md`, then save its `pack.json` into `packs/<id>/`. The **пакеты** page shows any errors.
+
+To see the format first, copy the example:
+
+```sh
+cp -r examples/packs/softmax packs/
+```
+
+## Tools
+
+```
+./fire dev | serve           run the app (dev: hot reload on :5190; serve: built app on :17490)
+./fire search <words>        find ideas to link to
+./fire show <code>           one idea as JSON
+./fire new <id>              scaffold a pack
+./fire validate [id…]        check packs (exit 1 on errors)
+./fire docs [-check]         regenerate docs/ from the code
+./fire progress export|import|reset
+```
+
+The HTTP API (localhost only) is described in [`docs/api.md`](docs/api.md).
 
 ## Layout
 
-| path | what |
+| Path | |
 |---|---|
-| `server/` | Go: content loader, FIRe (`fire.go`), attempts and progress (`lab.go`), leaderboard and stats (`social.go`), HTTP (`http.go`) |
-| `web/` | React + Vite, monospace UI, light and dark themes |
-| `tools/build_content.py` | `data/source` → `data/content.db` |
-| `tools/codex-weights/` | how Codex produced the FIRe weights (ML → ML, ML → math; `math/` — math → math) |
+| `server/` | Go: pack loader and validator, graph, FSRS-6 + FIRe, placement test, API, CLI |
+| `web/` | React 19 + Vite UI: dashboard, program, knowledge graph, packs, how-it-works |
+| `examples/packs/` | A small complete pack |
+| `docs/` | Generated reference: API, pack format, JSON Schema |
+| `AGENTS.md`, `.agents/skills/` | Instructions for agents (`CLAUDE.md` imports `AGENTS.md`; `.claude/skills` is a generated mirror) |
 
-## Run locally
+## Credits
 
-```sh
-python3 tools/build_content.py
-(cd server && go build -o ../bin/ml-lab .)
-./bin/ml-lab -db data/users.db &          # API on 127.0.0.1:17490/ml
-(cd web && npm ci && npm run dev)         # http://127.0.0.1:5190/ml/ (proxies /ml/api)
-```
-
-Production: `(cd web && npm run build)` and run the binary with `-web web/dist -secure`
-behind a reverse proxy that forwards `/ml*` to it.
-
+The FSRS-6 parameters and the reference implementation come from [open-spaced-repetition/py-fsrs](https://github.com/open-spaced-repetition/py-fsrs) (MIT). The Go port is checked against py-fsrs in tests. The idea of fractional implicit repetition comes from *The Math Academy Way*; no text or material from Math Academy is used. The code is MIT-licensed.

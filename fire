@@ -1,0 +1,6 @@
+#!/bin/sh
+# Builds the Go tool when needed and runs it: ./fire dev, ./fire validate, ./fire search …
+set -e
+cd "$(dirname "$0")"
+go build -C server -o ../bin/fire .
+exec ./bin/fire "$@"
