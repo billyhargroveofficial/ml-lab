@@ -199,6 +199,10 @@ func (a *API) routes() []route {
 			out, err := l.Next(r.Context(), localUser, a.track(r))
 			a.respond(w, out, err)
 		}},
+		{"GET", "/plan", "Every lesson of a track in teaching order with its state: learned, due, available, partial or locked (and what it waits for).", func(w http.ResponseWriter, r *http.Request) {
+			out, err := l.Plan(r.Context(), localUser, a.track(r))
+			a.respond(w, out, err)
+		}},
 		{"GET", "/history", "The last 40 finished tasks.", func(w http.ResponseWriter, r *http.Request) {
 			out, err := l.History(r.Context(), localUser)
 			a.respond(w, out, err)

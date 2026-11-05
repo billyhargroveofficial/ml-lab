@@ -1,11 +1,12 @@
 import { useMemo, useState, type CSSProperties } from 'react';
 import { useApi, type HistoryItem, type Me, type PackInfo, type Program, type Task } from '../api';
+import { PackSelect } from '../ui/PackSelect';
 import { Link, useSession } from '../App';
 import { Session } from '../ui/Session';
 import { Placement } from '../ui/Placement';
 import { fmt, LineChart, Ring } from '../ui/charts';
-import { AnimatePresence, Grow, motion, Num, Panel, Seg, soft, spring } from '../ui/motion';
-import { lessons, setPin } from '../ui/Pin';
+import { AnimatePresence, Collapse, Grow, motion, Num, Panel, soft, spring } from '../ui/motion';
+import { lessons, PinButton, setPin } from '../ui/Pin';
 
 const DAY = 864e5;
 const plural = (n: number, one: string, few: string, many: string) => { const a = n % 10, b = n % 100; return a === 1 && b !== 11 ? one : a >= 2 && a <= 4 && (b < 12 || b > 14) ? few : many; };
@@ -45,7 +46,7 @@ export function Dashboard() {
           {current ? (current.description || `${current.title}: ${current.ideas} ${plural(current.ideas, 'урок', 'урока', 'уроков')}.`) : packs.length ? `Все ваши пакеты вместе: ${packs.reduce((n, p) => n + p.ideas, 0)} уроков. Решая сложное, повторяешь простое — FIRe засчитывает повторение тем внутри задачи.` : 'Интервальное повторение по графу знаний. Темы добавляет ваш агент: попросите его составить уроки, и они появятся здесь.'}
         </motion.p></AnimatePresence>
       </div>
-      {packs.length > 0 && <div className="controls"><TrackPicker packs={packs} value={program} onChange={setProgram} /></div>}
+      {packs.length > 0 && <div className="controls"><PackSelect all packs={packs} value={program} onChange={setProgram} /></div>}
     </section>
 
     {failed && <p className="alert" role="alert">Не удалось загрузить часть данных. <button className="btn small" onClick={() => location.reload()}>Повторить</button></p>}
@@ -70,7 +71,8 @@ export function Dashboard() {
             {m && m.total >= 20 && m.learned >= m.total * 0.05 && <button className="linkbtn muted" onClick={() => setPlacing(true)}>вступительный тест ↗</button>}
           </>}
         </Panel>
-        {!empty && <Panel order={2} aria-label="История"><div className="phead"><h2>История</h2><span>последние задания</span></div><History items={history.data} /></Panel>}
+        {!empty && <Panel order={2} aria-label="Все уроки"><Plan track={track} packs={packs} onOpen={(kind, code) => setTask({ kind, code, n: Date.now() })} /></Panel>}
+        {!empty && <Panel order={3} aria-label="История"><div className="phead"><h2>История</h2><span>последние задания</span></div><History items={history.data} /></Panel>}
       </div>
 
       <aside className="col">
@@ -145,14 +147,6 @@ function ForecastPanel({ me, goal, onGoal }: { me?: Me; goal: number; onGoal: (g
   </>;
 }
 
-function TrackPicker({ packs, value, onChange }: { packs: PackInfo[]; value: string; onChange: (v: string) => void }) {
-  const items: [string, string][] = [['all', 'все пакеты'], ...packs.map(p => [p.id, p.title] as [string, string])];
-  if (packs.length <= 3) return <Seg big label="Программа" value={value} items={items} onChange={onChange} />;
-  return <label className="picker"><span className="muted">программа</span>
-    <select value={value} onChange={e => onChange(e.target.value)} aria-label="Программа">{items.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
-  </label>;
-}
-
 function Empty() {
   return <div className="intro">
     <p style={{ marginTop: 0 }}><b>Пакетов пока нет.</b> Пакет — это тема из нескольких уроков с задачами: папка <code>packs/&lt;id&gt;/</code> в этом репозитории.</p>
@@ -182,5 +176,50 @@ function Topics({ program, packs, outline, me }: { program: string; packs: PackI
       <span title={r.name}>{r.name}</span><span className="num">{r.learned}/{r.total}</span>
       <span className="meter"><Grow width={(r.learned - r.due) / Math.max(1, r.total) * 100} /><Grow className="due" width={r.due / Math.max(1, r.total) * 100} /></span>
     </motion.div>)}</div>}
+  </>;
+}
+
+interface PlanItem { code: string; name: string; pack: string; topic: string; topic_name: string; level: number; xp: number; state: 'learned' | 'due' | 'available' | 'partial' | 'locked'; waits?: string[] }
+const stateText: Record<PlanItem['state'], string> = { learned: 'выучено', due: 'пора повторить', available: 'можно начать', partial: 'начато', locked: 'закрыто' };
+
+// The whole track at once, grouped by topic: what is done, what is open now
+// and what each closed lesson waits for.
+function Plan({ track, packs, onOpen }: { track: string; packs: PackInfo[]; onOpen: (kind: Task['kind'], code: string) => void }) {
+  const plan = useApi<PlanItem[]>(`/plan?track=${track}`);
+  const [toggled, setToggled] = useState<Set<string>>(() => new Set());
+  const groups = useMemo(() => {
+    const m = new Map<string, { id: string; name: string; items: PlanItem[] }>();
+    for (const it of plan.data ?? []) {
+      const g = m.get(it.topic) ?? m.set(it.topic, { id: it.topic, name: it.topic_name, items: [] }).get(it.topic)!;
+      g.items.push(it);
+    }
+    return [...m.values()];
+  }, [plan.data]);
+  if (!plan.data) return <><div className="phead"><h2>Все уроки</h2></div><p className="skel">загрузка</p></>;
+  const items = plan.data;
+  const done = items.filter(i => i.state === 'learned' || i.state === 'due').length;
+  const many = groups.length > 6;
+  const multi = new Set(items.map(i => i.pack)).size > 1;
+  return <>
+    <div className="phead"><h2>Все уроки</h2><span>{done} из {items.length} · {items.filter(i => i.state === 'available' || i.state === 'partial').length} можно начать</span></div>
+    {groups.map(g => {
+      const active = g.items.some(i => i.state === 'available' || i.state === 'partial' || i.state === 'due');
+      const open = (many ? active : true) !== toggled.has(g.id);
+      const learned = g.items.filter(i => i.state === 'learned' || i.state === 'due').length;
+      const pack = multi ? packs.find(p => p.id === g.items[0].pack)?.title : undefined;
+      return <div className="plan-group" key={g.id}>
+        <button type="button" className="plan-head" aria-expanded={open} onClick={() => setToggled(s => { const n = new Set(s); if (n.has(g.id)) n.delete(g.id); else n.add(g.id); return n; })}>
+          <motion.span className="chev muted" animate={{ rotate: open ? 90 : 0 }} transition={soft} aria-hidden="true">›</motion.span>
+          <b>{g.name}{pack && <span className="muted" style={{ fontWeight: 400 }}> · {pack}</span>}</b><span className="num muted">{learned}/{g.items.length}</span>
+        </button>
+        <Collapse open={open}>{g.items.map(it => <div className="plan-row" key={it.code} data-state={it.state}>
+          <span className="dot" aria-hidden="true" />
+          <span><Link to={`/idea/${it.code}`}>{it.name}</Link><small>{stateText[it.state]}{it.state === 'locked' && it.waits?.length ? ` · ждёт: ${it.waits.join(', ')}` : ''} · {it.xp} XP</small></span>
+          {it.state === 'available' || it.state === 'partial' ? <button className="btn small" onClick={() => onOpen('lesson', it.code)}>учить</button>
+            : it.state === 'due' ? <button className="btn small" onClick={() => onOpen('review', it.code)}>повторить</button>
+            : it.state === 'locked' ? <PinButton code={it.code} label="↑ к этому" compact /> : <span />}
+        </div>)}</Collapse>
+      </div>;
+    })}
   </>;
 }

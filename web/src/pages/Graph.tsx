@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useApi, type Edge, type PackInfo } from '../api';
 import { go, Link, packTitle, useSession } from '../App';
 import { fmt } from '../ui/charts';
-import { AnimatePresence, motion, Num, Panel, Seg, soft } from '../ui/motion';
+import { AnimatePresence, motion, Num, Panel, soft } from '../ui/motion';
+import { PackSelect } from '../ui/PackSelect';
 import { PinButton } from '../ui/Pin';
 
 type Row = Edge & { from: string };
@@ -76,7 +77,6 @@ export function GraphPage() {
   const url = (c: string, v: string) => history.replaceState(null, '', `?view=${v}&idea=${encodeURIComponent(c)}`);
   const select = (c: string) => { setCode(c); url(c, view); };
   const changeView = (v: string) => { setView(v); url(code, v); };
-  const viewItems: [string, string][] = [['all', 'все пакеты'], ...packs.map(p => [p.id, p.title] as [string, string])];
   const [memory, setMemory] = useState(0.3);
 
   const stats = useMemo(() => {
@@ -91,7 +91,7 @@ export function GraphPage() {
     <div className="page-head"><div>
       <h1>Граф знаний</h1>
       <p className="muted" style={{ margin: '6px 0 0', maxWidth: '78ch' }}>Каждое ребро «сложная → простая» несёт вес <code>encompassing</code>: какую долю повторения простой темы засчитывает успешное решение сложной. Сплошные рёбра — <code>requires</code> (блокируют урок), пунктир — <code>uses</code> (только раздают повторение). Веса ставит автор пакета — обычно агент — по рубрике из <code>docs/pack-format.md</code>.</p>
-    </div>{packs.length > 1 && (packs.length <= 4 ? <Seg big label="Какой граф" value={view} items={viewItems} onChange={changeView} /> : <select value={view} onChange={e => changeView(e.target.value)} aria-label="Какой граф">{viewItems.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>)}</div>
+    </div>{packs.length > 0 && <PackSelect all packs={packs} value={view} onChange={changeView} />}</div>
     {!packs.length && list.data ? <p className="muted">Пакетов пока нет — граф появится, когда вы добавите первый.</p> : !g ? <p className="skel">загрузка графа</p> : <>
       <Picker g={g} code={code} onPick={select} />
       {g.nodes.has(code) ? <>

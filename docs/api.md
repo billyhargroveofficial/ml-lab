@@ -22,6 +22,7 @@ The server listens on `127.0.0.1:17490`. Every path starts with `/api/v1`. Write
 | POST | `/api/v1/pin` | Set a goal {"code": idea or topic code}; an empty code clears it. The next lesson on the way to it leads the feed. |
 | POST | `/api/v1/placement` | Start the placement test on ?track=. |
 | POST | `/api/v1/placement/answer` | Answer a placement question {"choice": n}, −1 is "don't know". |
+| GET | `/api/v1/plan` | Every lesson of a track in teaching order with its state: learned, due, available, partial or locked (and what it waits for). |
 | GET | `/api/v1/program/{pack}` | One pack as a tree: section → topics → idea codes, plus a short card per idea. |
 | GET | `/api/v1/progress/export` | Download all progress as JSON (format fire-progress-v1). |
 | POST | `/api/v1/progress/import` | Replace all progress with an export (the request body). |

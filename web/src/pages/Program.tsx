@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useApi, type Me, type Program } from '../api';
 import { Link, useSession } from '../App';
-import { Collapse, motion, Seg, soft } from '../ui/motion';
+import { Collapse, motion, soft } from '../ui/motion';
+import { PackSelect } from '../ui/PackSelect';
 import { PinButton } from '../ui/Pin';
 
 export function ProgramPage() {
@@ -20,13 +21,11 @@ export function ProgramPage() {
   const topics = o?.sections.flatMap(s => s.topics) ?? [];
   const openByDefault = topics.length <= 6;
   const choose = (p: string) => { setChosen(p); setToggled(new Set()); history.replaceState(null, '', `?program=${p}`); };
-  const items: [string, string][] = packs.map(p => [p.id, p.title]);
   return <div className="wrap page">
     <div className="page-head">
       <div><h1>Программа</h1><p className="muted" style={{ margin: '6px 0 0' }}>{o ? `${Object.keys(o.ideas).length} уроков в ${topics.length} ${topics.length === 1 ? 'теме' : 'темах'}.` : packs.length ? '' : 'Пакетов пока нет — см. «как это работает».'}</p></div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        {packs.length > 1 && (packs.length <= 4 ? <Seg big label="Пакет" value={program} items={items} onChange={choose} />
-          : <select value={program} onChange={e => choose(e.target.value)} aria-label="Пакет">{items.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>)}
+        {packs.length > 0 && <PackSelect packs={packs} value={program} onChange={choose} />}
         {o && topics.length > 1 && <button className="btn" style={{ minWidth: 150 }} onClick={() => setToggled(toggled.size ? new Set() : new Set(topics.map(t => t.id)))}>{toggled.size ? 'как было' : openByDefault ? 'свернуть всё' : 'развернуть всё'}</button>}
         <input type="search" placeholder="поиск…" value={q} onChange={e => setQ(e.target.value)} style={{ width: 200 }} aria-label="Поиск по программе" />
       </div>

@@ -719,3 +719,54 @@ func (l *Lab) History(ctx context.Context, user int64) ([]HistoryItem, error) {
 	}
 	return out, nil
 }
+
+type PlanItem struct {
+	Code      string   `json:"code"`
+	Name      string   `json:"name"`
+	Pack      string   `json:"pack"`
+	Topic     string   `json:"topic"`
+	TopicName string   `json:"topic_name"`
+	Level     int      `json:"level"`
+	XP        int      `json:"xp"`
+	State     string   `json:"state"` // learned | due | available | partial | locked
+	Waits     []string `json:"waits,omitempty"`
+}
+
+// Plan lists the whole track in teaching order, so the learner sees what is
+// ahead, not only today's feed.
+func (l *Lab) Plan(ctx context.Context, user int64, track string) ([]PlanItem, error) {
+	mem, err := loadMemory(ctx, l.st.db, user)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	out := []PlanItem{}
+	for _, g := range l.c.schedulingIdeas(track) {
+		i := l.c.Ideas[g.Code]
+		it := PlanItem{Code: i.Code, Name: i.Name, Pack: i.Program, Topic: i.TopicID, Level: i.Level, XP: 3 + 3*i.Level}
+		if t := l.c.Topics[i.TopicID]; t != nil {
+			it.TopicName = t.Name
+		}
+		m := mem[i.Code]
+		switch {
+		case m.Status == "learned" && m.Due(now):
+			it.State = "due"
+		case m.Status == "learned":
+			it.State = "learned"
+		case Frontier(g, mem):
+			it.State = "available"
+			if m.Status == "partial" {
+				it.State = "partial"
+			}
+		default:
+			it.State = "locked"
+			for _, e := range g.Prerequisites {
+				if mem[e.Code].Status != "learned" && len(it.Waits) < 2 {
+					it.Waits = append(it.Waits, l.c.Ideas[e.Code].Name)
+				}
+			}
+		}
+		out = append(out, it)
+	}
+	return out, nil
+}
