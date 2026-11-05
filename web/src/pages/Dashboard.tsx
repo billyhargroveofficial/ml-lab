@@ -48,13 +48,15 @@ export function Dashboard() {
     <section className="hero">
       <div>
         <h1>ML Lab<span>_</span></h1>
-        <p>{program === 'math'
-          ? 'Математика от школьной базы до уровня ML: уроки, повторения и проверки. Каждая ML-идея неявно повторяет математику, на которой стоит.'
-          : 'Идеи с собеседований DS/ML/AI в порядке их веса. Интервальное повторение FIRe: решая сложное, повторяешь простое.'}</p>
+        <div className="stack">
+          <p data-on={program === 'ml' || undefined}>Идеи с собеседований DS/ML/AI в порядке их веса. Интервальное повторение FIRe: решая сложное, повторяешь простое.</p>
+          <p data-on={program === 'math' || undefined}>Математика от школьной базы до уровня ML: уроки, повторения и проверки. Каждая ML-идея неявно повторяет математику, на которой стоит.</p>
+        </div>
       </div>
       <div className="controls">
         <Seg big label="Программа" value={program} items={[['ml', 'ML теория'], ['math', 'ML математика']]} onChange={setProgram} />
-        {program === 'ml' && <Seg label="Направление" value={mlTrack} items={[['all', 'все'], ['ds', 'DS'], ['ml', 'ML'], ['ai', 'AI']]} onChange={setMlTrack} />}
+        {/* Kept in the layout for math too, so switching programs never shifts the page. */}
+        <div style={{ visibility: program === 'ml' ? 'visible' : 'hidden' }} aria-hidden={program !== 'ml'}><Seg label="Направление" value={mlTrack} items={[['all', 'все'], ['ds', 'DS'], ['ml', 'ML'], ['ai', 'AI']]} onChange={setMlTrack} /></div>
       </div>
     </section>
 

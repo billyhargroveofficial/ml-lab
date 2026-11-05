@@ -5,20 +5,25 @@ import { Link, useSession } from '../App';
 export function ProgramPage() {
   const [program, setProgram] = useState<'ml' | 'math'>(() => new URLSearchParams(location.search).get('program') === 'math' ? 'math' : 'ml');
   const [q, setQ] = useState('');
+  const [opened, setOpened] = useState<Set<string>>(() => new Set());
   const { me: session } = useSession();
-  const outline = useApi<Program>(`/program/${program}`);
+  const ml = useApi<Program>('/program/ml'), mathP = useApi<Program>('/program/math');
+  const outline = program === 'ml' ? ml : mathP;
   const me = useApi<Me>(session ? `/me?track=${program === 'math' ? 'math' : 'all'}` : null);
   const mem = useMemo(() => new Map(me.data?.ideas.map(i => [i.code, i]) ?? []), [me.data]);
   const now = Date.now();
   const status = (code: string) => { const x = mem.get(code); return x?.due_at && new Date(x.due_at).getTime() <= now ? 'due' : x?.status; };
   const needle = q.trim().toLowerCase();
   const o = outline.data;
-  const count = o ? Object.keys(o.ideas).length : 0;
   return <div className="wrap page">
     <div className="page-head">
-      <div><h1>Программа</h1><p className="muted" style={{ margin: '6px 0 0' }}>{program === 'ml' ? `${count} идей с собеседований, по разделам и темам. Число — на скольких собесах спрашивали.` : `${count} тем математики, от школьной базы до ML.`}</p></div>
+      <div><h1>Программа</h1><div className="stack" style={{ marginTop: 6 }}>
+        <p className="muted" style={{ margin: 0 }} data-on={program === 'ml' || undefined}>{ml.data ? Object.keys(ml.data.ideas).length : 427} идей с собеседований, по разделам и темам. Число — на скольких собесах спрашивали.</p>
+        <p className="muted" style={{ margin: 0 }} data-on={program === 'math' || undefined}>{mathP.data ? Object.keys(mathP.data.ideas).length : 1642} тем математики, от школьной базы до ML.</p>
+      </div></div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <div className="seg big" role="group" aria-label="Программа">{(['ml', 'math'] as const).map(p => <button key={p} aria-pressed={program === p} onClick={() => { setProgram(p); history.replaceState(null, '', `?program=${p}`); }}>{p === 'ml' ? 'ML теория' : 'ML математика'}</button>)}</div>
+        {o && <button className="btn" style={{ minWidth: 150 }} onClick={() => setOpened(opened.size ? new Set() : new Set(o.sections.map(x => x.id)))}>{opened.size ? 'свернуть всё' : 'развернуть всё'}</button>}
         <input type="search" placeholder="поиск…" value={q} onChange={e => setQ(e.target.value)} style={{ width: 200 }} aria-label="Поиск по программе" />
       </div>
     </div>
@@ -26,12 +31,19 @@ export function ProgramPage() {
     {!o ? <p className="skel">загрузка программы</p> : o.sections.map(s => {
       const topics = s.topics.map(t => ({ ...t, ideas: t.ideas.filter(c => !needle || o.ideas[c].name.toLowerCase().includes(needle) || t.name.toLowerCase().includes(needle)) })).filter(t => t.ideas.length);
       if (!topics.length) return null;
-      return <section className="sec panel" key={s.id}>
-        <h3>{s.name}</h3>{s.description && <p>{s.description}</p>}
+      const all = topics.flatMap(t => t.ideas);
+      const learned = all.filter(c => status(c) === 'learned').length;
+      const open = !!needle || opened.has(s.id);
+      return <details className="sec panel" key={s.id} open={open} onToggle={e => { const isOpen = (e.currentTarget as HTMLDetailsElement).open; if (!needle && isOpen !== opened.has(s.id)) setOpened(o => { const n = new Set(o); if (isOpen) n.add(s.id); else n.delete(s.id); return n; }); }}>
+        <summary className="sec-head">
+          <span className="chev" aria-hidden="true">›</span>
+          <span className="sec-title"><h3>{s.name}</h3>{s.description && <p>{s.description}</p>}</span>
+          <span className="num">{session ? `${learned}/` : ''}{all.length} · {topics.length} тем</span>
+        </summary>
         {topics.map(t => <div className="tp" key={t.id}><b>{t.name}</b><div className="chips">{t.ideas.map(c => <Link key={c} to={`/idea/${c}`} className="chip" data-s={status(c)}>
           <span>{o.ideas[c].name}</span>{program === 'ml' && o.ideas[c].interviews > 0 && <small>{o.ideas[c].interviews}</small>}
         </Link>)}</div></div>)}
-      </section>;
+      </details>;
     })}
   </div>;
 }

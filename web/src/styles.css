@@ -241,9 +241,19 @@ input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border-radius: 
 .page { padding-top: 28px; padding-bottom: 60px; }
 .page-head { display: flex; justify-content: space-between; align-items: end; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
 .page-head h1 { font-size: 26px; letter-spacing: -.03em; }
-.sec { margin-bottom: 18px; }
-.sec > h3 { font-size: 14px; margin-bottom: 4px; }
-.sec > p { margin: 0 0 8px; color: var(--muted); }
+.sec { margin-bottom: 10px; padding: 0; }
+.sec-head { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 10px; align-items: baseline; padding: 14px 16px; cursor: pointer; list-style: none; }
+.sec-head::-webkit-details-marker { display: none; }
+.sec-head:hover h3 { color: var(--accent); }
+.sec-head .chev { display: inline-block; color: var(--muted); font-size: 16px; line-height: 1; transition: transform .15s; }
+.sec[open] > .sec-head .chev { transform: rotate(90deg); }
+.sec-head h3 { font-size: 14px; margin: 0; }
+.sec-head p { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
+.sec-head .num { white-space: nowrap; }
+.sec[open] > .sec-head { border-bottom: 1px solid var(--line); }
+.sec > .tp { margin: 0 16px; }
+.sec > .tp:first-of-type { border-top: 0; }
+.sec[open] { padding-bottom: 8px; }
 .tp { border-top: 1px dashed var(--line); padding: 8px 0; display: grid; grid-template-columns: 240px 1fr; gap: 12px; }
 .tp > b { font-weight: 500; font-size: 12px; }
 @media (max-width: 700px) { .tp { grid-template-columns: 1fr; gap: 6px; } }
@@ -291,3 +301,8 @@ input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border-radius: 
 .foot .wrap { display: flex; gap: 16px; flex-wrap: wrap; justify-content: space-between; }
 .skel { color: transparent !important; background: var(--sunk); border-radius: 4px; animation: pulse 1.2s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: .55; } }
+
+/* Both variants of a text share one cell: the block is always as tall as the longer one. */
+.stack { display: grid; }
+.stack > * { grid-area: 1 / 1; }
+.stack > :not([data-on]) { visibility: hidden; }
