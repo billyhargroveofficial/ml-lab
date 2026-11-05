@@ -136,7 +136,7 @@ export function GraphCanvas({ g, code, down, up, focus, onPick }: { g: GData; co
       box.addChild(bg, label, sub);
       box.eventMode = 'static';
       box.cursor = 'pointer';
-      box.on('pointertap', () => pick.current(n.code));
+      box.on('pointertap', ev => { if (ev.button === 0) pick.current(n.code); });
       box.on('pointerover', ev => { const r = host.current!.getBoundingClientRect(); setTip({ x: ev.client.x - r.left, y: ev.client.y - r.top, n }); });
       box.on('pointerout', () => setTip(null));
       nodesLayer.addChild(box);
