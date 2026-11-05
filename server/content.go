@@ -13,7 +13,6 @@ type Section struct {
 	Program     string   `json:"program"`
 	Name        string   `json:"name"`
 	Description string   `json:"description,omitempty"`
-	Interviews  int      `json:"interviews"`
 	Topics      []*Topic `json:"topics"`
 }
 
@@ -23,16 +22,7 @@ type Topic struct {
 	Code       string   `json:"code,omitempty"`
 	Name       string   `json:"name"`
 	Definition string   `json:"definition,omitempty"`
-	Interviews int      `json:"interviews"`
 	Ideas      []string `json:"ideas"`
-}
-
-type Share struct {
-	K        int     `json:"k"`
-	Share    float64 `json:"share"`
-	Low      float64 `json:"low"`
-	High     float64 `json:"high"`
-	Frequent bool    `json:"frequent"`
 }
 
 type Question struct {
@@ -51,59 +41,30 @@ type Edge struct {
 	Source       string  `json:"source"`
 }
 
-type Formulation struct {
-	Text   string          `json:"text"`
-	Counts json.RawMessage `json:"counts,omitempty"`
-}
-
 type Idea struct {
-	Code         string           `json:"code"`
-	ID           string           `json:"id"`
-	Program      string           `json:"program"`
-	TopicID      string           `json:"topic_id"`
-	Name         string           `json:"name"`
-	Definition   string           `json:"definition,omitempty"`
-	Level        int              `json:"level"`
-	Weight       float64          `json:"weight"`
-	Interviews   int              `json:"interviews"`
-	Lesson       string           `json:"lesson,omitempty"`
-	Shares       map[string]Share `json:"shares,omitempty"`
-	Formulations []Formulation    `json:"formulations,omitempty"`
-	Questions    []Question       `json:"questions,omitempty"`
-	Edges        []Edge           `json:"prerequisites"`
-	EncompassedBy []Edge          `json:"encompassed_by"`
-	order        int
-}
-
-type MarketTrack struct {
-	Name       string  `json:"name"`
-	Interviews float64 `json:"interviews"`
-	Unseen     float64 `json:"unseen"`
-	Curve      struct {
-		Job          []float64 `json:"job"`
-		PerInterview []float64 `json:"per_interview"`
-	} `json:"curve"`
-	Thresholds struct {
-		O1 *int `json:"o1"`
-	} `json:"thresholds"`
-	Order []struct {
-		Code  string `json:"code"`
-		Asked int    `json:"asked"`
-	} `json:"order"`
+	Code          string     `json:"code"`
+	ID            string     `json:"id"`
+	Program       string     `json:"program"`
+	TopicID       string     `json:"topic_id"`
+	Name          string     `json:"name"`
+	Definition    string     `json:"definition,omitempty"`
+	Level         int        `json:"level"`
+	Weight        float64    `json:"weight"`
+	Lesson        string     `json:"lesson,omitempty"`
+	Questions     []Question `json:"questions,omitempty"`
+	Edges         []Edge     `json:"prerequisites"`
+	EncompassedBy []Edge     `json:"encompassed_by"`
+	order         int
 }
 
 type Content struct {
-	Info      json.RawMessage
-	MarketRaw json.RawMessage
-	Market    struct {
-		Tracks map[string]MarketTrack `json:"tracks"`
-	}
+	Info     json.RawMessage
 	Sections map[string][]*Section // by program
 	Ideas    map[string]*Idea      // by code
+	Topics   map[string]*Topic     // by id
 	ByID     map[string]*Idea
-	Program  map[string][]*Idea // by program, in order
+	Program  map[string][]*Idea  // by program, in order
 	Graph    map[string]FIREIdea // full graph incl. implicit edges, for propagation
-	Asked    map[string]map[string]float64 // track → code → interview count
 }
 
 func LoadContent(path string) (*Content, error) {
@@ -112,82 +73,51 @@ func LoadContent(path string) (*Content, error) {
 		return nil, err
 	}
 	defer db.Close()
-	c := &Content{Sections: map[string][]*Section{}, Ideas: map[string]*Idea{}, ByID: map[string]*Idea{}, Program: map[string][]*Idea{}, Graph: map[string]FIREIdea{}, Asked: map[string]map[string]float64{}}
-	var info, market string
+	c := &Content{Sections: map[string][]*Section{}, Ideas: map[string]*Idea{}, Topics: map[string]*Topic{}, ByID: map[string]*Idea{}, Program: map[string][]*Idea{}, Graph: map[string]FIREIdea{}}
+	var info string
 	if err := db.QueryRow(`SELECT value FROM meta WHERE key='info'`).Scan(&info); err != nil {
 		return nil, fmt.Errorf("meta: %w", err)
 	}
-	if err := db.QueryRow(`SELECT value FROM meta WHERE key='market'`).Scan(&market); err != nil {
-		return nil, err
-	}
-	c.Info, c.MarketRaw = json.RawMessage(info), json.RawMessage(market)
-	if err := json.Unmarshal(c.MarketRaw, &c.Market); err != nil {
-		return nil, err
-	}
+	c.Info = json.RawMessage(info)
 	sections := map[string]*Section{}
-	rows, err := db.Query(`SELECT id, program, name, coalesce(description,''), coalesce(interviews,0) FROM sections ORDER BY program, ord`)
+	rows, err := db.Query(`SELECT id, program, name, coalesce(description,'') FROM sections ORDER BY program, ord`)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		s := &Section{Topics: []*Topic{}}
-		if err := rows.Scan(&s.ID, &s.Program, &s.Name, &s.Description, &s.Interviews); err != nil {
+		if err := rows.Scan(&s.ID, &s.Program, &s.Name, &s.Description); err != nil {
 			return nil, err
 		}
 		sections[s.ID] = s
 		c.Sections[s.Program] = append(c.Sections[s.Program], s)
 	}
 	topics := map[string]*Topic{}
-	rows, err = db.Query(`SELECT id, section_id, coalesce(code,''), name, coalesce(definition,''), coalesce(interviews,0) FROM topics ORDER BY program, ord`)
+	rows, err = db.Query(`SELECT id, section_id, coalesce(code,''), name, coalesce(definition,'') FROM topics ORDER BY program, ord`)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		t := &Topic{Ideas: []string{}}
-		if err := rows.Scan(&t.ID, &t.SectionID, &t.Code, &t.Name, &t.Definition, &t.Interviews); err != nil {
+		if err := rows.Scan(&t.ID, &t.SectionID, &t.Code, &t.Name, &t.Definition); err != nil {
 			return nil, err
 		}
 		topics[t.ID] = t
+		c.Topics[t.ID] = t
 		sections[t.SectionID].Topics = append(sections[t.SectionID].Topics, t)
 	}
-	rows, err = db.Query(`SELECT code, id, program, topic_id, ord, name, coalesce(definition,''), level, weight, interviews, lesson FROM ideas ORDER BY program, ord`)
+	rows, err = db.Query(`SELECT code, id, program, topic_id, ord, name, coalesce(definition,''), level, weight, lesson FROM ideas ORDER BY program, ord`)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
-		i := &Idea{Shares: map[string]Share{}, Edges: []Edge{}, EncompassedBy: []Edge{}}
-		if err := rows.Scan(&i.Code, &i.ID, &i.Program, &i.TopicID, &i.order, &i.Name, &i.Definition, &i.Level, &i.Weight, &i.Interviews, &i.Lesson); err != nil {
+		i := &Idea{Edges: []Edge{}, EncompassedBy: []Edge{}}
+		if err := rows.Scan(&i.Code, &i.ID, &i.Program, &i.TopicID, &i.order, &i.Name, &i.Definition, &i.Level, &i.Weight, &i.Lesson); err != nil {
 			return nil, err
 		}
 		c.Ideas[i.Code], c.ByID[i.ID] = i, i
 		c.Program[i.Program] = append(c.Program[i.Program], i)
 		topics[i.TopicID].Ideas = append(topics[i.TopicID].Ideas, i.Code)
-	}
-	rows, err = db.Query(`SELECT code, track, k, share, low, high, frequent FROM interview_shares`)
-	if err != nil {
-		return nil, err
-	}
-	for rows.Next() {
-		var code, track string
-		var s Share
-		if err := rows.Scan(&code, &track, &s.K, &s.Share, &s.Low, &s.High, &s.Frequent); err != nil {
-			return nil, err
-		}
-		c.Ideas[code].Shares[track] = s
-	}
-	rows, err = db.Query(`SELECT code, text, coalesce(counts,'{}') FROM formulations ORDER BY code, ord`)
-	if err != nil {
-		return nil, err
-	}
-	for rows.Next() {
-		var code string
-		var f Formulation
-		var counts string
-		if err := rows.Scan(&code, &f.Text, &counts); err != nil {
-			return nil, err
-		}
-		f.Counts = json.RawMessage(counts)
-		c.Ideas[code].Formulations = append(c.Ideas[code].Formulations, f)
 	}
 	rows, err = db.Query(`SELECT code, question, options, correct, coalesce(explanation,''), coalesce(difficulty,0) FROM questions ORDER BY code, ord`)
 	if err != nil {
@@ -228,18 +158,11 @@ func LoadContent(path string) (*Content, error) {
 		}
 		c.Graph[code] = g
 	}
-	for name, t := range c.Market.Tracks {
-		m := map[string]float64{}
-		for _, o := range t.Order {
-			m[o.Code] = float64(o.Asked)
-		}
-		c.Asked[name] = m
-	}
 	return c, nil
 }
 
-// Tracks: the ML program is weighted per interview track, math by its own weight.
-var tracks = map[string]bool{"all": true, "ds": true, "ml": true, "ai": true, "math": true}
+// Tracks: "all" is the ML program, "math" the math program.
+var tracks = map[string]bool{"all": true, "math": true}
 
 func programOf(track string) string {
 	if track == "math" {
@@ -248,13 +171,8 @@ func programOf(track string) string {
 	return "ml"
 }
 
-// weight is the scheduling and coverage weight of an idea in a track.
-func (c *Content) weight(i *Idea, track string) float64 {
-	if track == "math" {
-		return i.Weight
-	}
-	return c.Asked[track][i.Code]
-}
+// weight orders lessons and weighs progress; it is the idea's own weight.
+func (c *Content) weight(i *Idea, _ string) float64 { return i.Weight }
 
 // schedulingIdeas is the program as FIRe sees it for next tasks: only blocking
 // prerequisites of the same program. Implicit cross-program edges never lock a

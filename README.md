@@ -1,7 +1,7 @@
 # ML Lab
 
-Open interview-prep trainer for DS / ML / AI: **427 ML ideas** taken from 167 real
-interviews and **1642 math topics** from school arithmetic to SVD, convex
+Open trainer for machine learning and math: **427 ML ideas** from metrics and trees
+to transformers and LLMs, and **1293 math topics** from functions and calculus to SVD, convex
 optimisation and statistics. Every idea has a lesson and 3–6 multiple-choice
 questions. Scheduling is FIRe (Fractional Implicit Repetition, from *The Math
 Academy Way*): solving a composite task counts as a partial review of the simpler
@@ -11,10 +11,10 @@ Live: https://billyhargrove.ru/ml · API docs: https://billyhargrove.ru/ml/docs
 
 ## What is open
 
-- `data/source/*.json` — the program bundles, the market index and the Codex weights;
+- `data/source/*.json` — the program bundles and the Codex weights;
 - `data/content.db` — the same as one read-only SQLite file (built by `tools/build_content.py`,
   downloadable at `/ml/data/content.db`);
-- a keyless JSON API at `/ml/api/v1` (program, ideas with answers, graph, market,
+- a keyless JSON API at `/ml/api/v1` (program, ideas with answers, graph,
   leaderboard, anonymized stats).
 
 Code is MIT, content is CC BY 4.0 (`data/LICENSE.md`).

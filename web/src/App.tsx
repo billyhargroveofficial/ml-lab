@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, type AnchorHTMLAttributes, type MouseEvent, type ReactNode } from 'react';
 import { api, refresh, useApi, type Me } from './api';
+import { AnimatePresence, MotionConfig, motion } from 'framer-motion';
 import { Dashboard } from './pages/Dashboard';
 import { Docs } from './pages/Docs';
 import { StatsPage } from './pages/Stats';
@@ -61,18 +62,17 @@ export function App() {
   else page = <div className="wrap page"><h1>404</h1><p className="muted">Такой страницы нет. <Link to="/">На главную</Link></p></div>;
   const nav = [['/', 'учиться'], ['/program', 'программа'], ['/graph', 'граф'], ['/stats', 'статистика'], ['/docs', 'api']] as const;
 
-  return <SessionCtx.Provider value={session}>
+  return <MotionConfig reducedMotion="user"><SessionCtx.Provider value={session}>
     <header className="top"><div className="wrap">
-      <Link to="/" className="brand"><i>ml</i>ML Lab</Link>
-      <nav className="nav">{nav.map(([to, label]) => <Link key={to} to={to} aria-current={path === to ? 'page' : undefined}>{label}</Link>)}</nav>
+      <nav className="nav">{nav.map(([to, label]) => <Link key={to} to={to} aria-current={path === to ? 'page' : undefined}>{path === to && <motion.span layoutId="nav-pill" className="nav-pill" transition={{ type: 'spring', stiffness: 420, damping: 36 }} />}<span className="seg-label">{label}</span></Link>)}</nav>
       <span className="spacer" />
       {session.me && <span className="who"><span className="name muted">@{session.me.user}</span><button className="btn small ghost" onClick={session.logout}>выйти</button></span>}
-      <button className="iconbtn" aria-label={dark ? 'Светлая тема' : 'Тёмная тема'} title={dark ? 'Светлая тема' : 'Тёмная тема'} onClick={toggle}>{dark ? '☀' : '☾'}</button>
+      <motion.button whileTap={{ scale: 0.9 }} className="iconbtn" aria-label={dark ? 'Светлая тема' : 'Тёмная тема'} title={dark ? 'Светлая тема' : 'Тёмная тема'} onClick={toggle}><AnimatePresence mode="wait" initial={false}><motion.span key={String(dark)} initial={{ rotate: -90, opacity: 0 }} animate={{ rotate: 0, opacity: 1 }} exit={{ rotate: 90, opacity: 0 }} transition={{ duration: 0.18 }}>{dark ? '☀' : '☾'}</motion.span></AnimatePresence></motion.button>
     </div></header>
-    <main>{page}</main>
+    <main><AnimatePresence mode="wait" initial={false}><motion.div key={path} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ type: 'spring', stiffness: 300, damping: 32, opacity: { duration: 0.16 } }}>{page}</motion.div></AnimatePresence></main>
     <footer className="foot"><div className="wrap">
-      <span>ML Lab — открытая программа подготовки к собесам DS/ML/AI. Не связан с Math Academy.{session.me && <> · <button className="btn small ghost" style={{ height: 'auto', padding: 0, color: 'inherit' }} onClick={session.remove}>удалить аккаунт</button></>}</span>
+      <span>ML Lab — открытая программа по ML и математике. Не связан с Math Academy.{session.me && <> · <button className="btn small ghost" style={{ height: 'auto', padding: 0, color: 'inherit' }} onClick={session.remove}>удалить аккаунт</button></>}</span>
       <span><a href="https://github.com/billyhargroveofficial/ml-lab">github</a> · <Link to="/docs">api</Link> · <a href="/ml/data/content.db">content.db</a> · контент CC BY 4.0, код MIT</span>
     </div></footer>
-  </SessionCtx.Provider>;
+  </SessionCtx.Provider></MotionConfig>;
 }

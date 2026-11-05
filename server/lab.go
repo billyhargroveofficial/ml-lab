@@ -224,6 +224,12 @@ func (l *Lab) Answer(ctx context.Context, user, id int64, choice int) (*AnswerVi
 	var as []storedA
 	_ = json.Unmarshal([]byte(qsRaw), &qs)
 	_ = json.Unmarshal([]byte(asRaw), &as)
+	// Content can change between deploys: an attempt over removed ideas ends.
+	for _, x := range qs {
+		if i := l.c.Ideas[x.Code]; i == nil || x.Index >= len(i.Questions) {
+			return nil, errFinished
+		}
+	}
 	q := qs[len(as)]
 	full := l.c.Ideas[q.Code].Questions[q.Index]
 	if choice < 0 || choice >= len(full.Options) {
@@ -392,17 +398,14 @@ type Me struct {
 	Total    int          `json:"total"`
 	Learned  int          `json:"learned"`
 	Due      int          `json:"due"`
-	Coverage float64      `json:"coverage"`
-	Offers   float64      `json:"offers"`
-	AnyOffer float64      `json:"any_offer"`
+	Progress float64      `json:"progress"`
 	XP       int          `json:"xp"`
 	TodayXP  int          `json:"today_xp"`
 	ToQuiz   int          `json:"xp_to_quiz"`
 	Days     []Day        `json:"days"`
 	Ideas    []MemoryView `json:"ideas"`
 	Forecast struct {
-		All   Forecast  `json:"all"`
-		Offer *Forecast `json:"offer,omitempty"`
+		All Forecast `json:"all"`
 	} `json:"forecast"`
 }
 
@@ -426,22 +429,7 @@ func (l *Lab) coverage(track string, mem map[string]FIREMemory) float64 {
 	if total == 0 {
 		return 0
 	}
-	unseen := 0.0
-	if t, ok := l.c.Market.Tracks[track]; ok {
-		unseen = t.Unseen
-	}
-	return math.Max(0, math.Min(1, w/total*(1-unseen)))
-}
-
-func curveAt(curve []float64, coverage float64) float64 {
-	if len(curve) == 0 {
-		return 0
-	}
-	x := math.Max(0, math.Min(100, coverage*100))
-	lo := int(math.Floor(x))
-	hi := min(len(curve)-1, lo+1)
-	lo = min(lo, len(curve)-1)
-	return curve[lo] + (curve[hi]-curve[lo])*(x-float64(lo))
+	return math.Max(0, math.Min(1, w/total))
 }
 
 func (l *Lab) days(ctx context.Context, user int64, n int) ([]Day, error) {
@@ -496,11 +484,7 @@ func (l *Lab) Me(ctx context.Context, user int64, name, track string) (*Me, erro
 			me.Due++
 		}
 	}
-	me.Coverage = l.coverage(track, mem)
-	if t, ok := l.c.Market.Tracks[track]; ok {
-		me.Offers = t.Interviews * curveAt(t.Curve.PerInterview, me.Coverage)
-		me.AnyOffer = curveAt(t.Curve.Job, me.Coverage)
-	}
+	me.Progress = l.coverage(track, mem)
 	_ = l.st.db.QueryRowContext(ctx, `SELECT coalesce(sum(xp),0) FROM attempts WHERE user_id=?`, user).Scan(&me.XP)
 	var since int
 	_ = l.st.db.QueryRowContext(ctx, `SELECT since_quiz FROM xp_state WHERE user_id=?`, user).Scan(&since)
@@ -522,21 +506,6 @@ func (l *Lab) Me(ctx context.Context, user int64, name, track string) (*Me, erro
 	}
 	f := FIREEstimate(sched, mem, rate, pace, 0.75, now)
 	me.Forecast.All = Forecast{math.Round(f.RemainingXP), f.Days, f.ETADate}
-	if t, ok := l.c.Market.Tracks[track]; ok && t.Thresholds.O1 != nil {
-		n := max(0, min(*t.Thresholds.O1, len(t.Order)))
-		by := map[string]FIREIdea{}
-		for _, s := range sched {
-			by[s.Code] = s
-		}
-		subset := []FIREIdea{}
-		for _, o := range t.Order[:n] {
-			if s, ok := by[o.Code]; ok {
-				subset = append(subset, s)
-			}
-		}
-		o := FIREEstimate(subset, mem, rate, pace, 0.75, now)
-		me.Forecast.Offer = &Forecast{math.Round(o.RemainingXP), o.Days, o.ETADate}
-	}
 	return me, nil
 }
 
@@ -550,6 +519,105 @@ type TaskView struct {
 	DueAt *time.Time `json:"due_at,omitempty"`
 	// Covers lists due reviews this lesson repeats implicitly.
 	Covers []string `json:"covers,omitempty"`
+	// Goal is set on the pinned task: the idea the learner chose to study
+	// next, and how many lessons are left on the way to it (itself included).
+	Goal     string `json:"goal,omitempty"`
+	GoalCode string `json:"goal_code,omitempty"`
+	GoalLeft int    `json:"goal_left,omitempty"`
+	GoalKind string `json:"goal_kind,omitempty"`
+}
+
+// Pin is the learner's chosen next step: one idea (a lesson) or a whole topic.
+type Pin struct {
+	Code  string `json:"code"`
+	Kind  string `json:"kind"` // idea | topic
+	Title string `json:"title"`
+	Left  int    `json:"left"`
+	Next  string `json:"next"`
+}
+
+// goalCodes resolves a pin to the ideas it asks for.
+func (l *Lab) goalCodes(code string) (kind, title string, codes []string) {
+	if i := l.c.Ideas[code]; i != nil {
+		return "idea", i.Name, []string{code}
+	}
+	if t := l.c.Topics[code]; t != nil {
+		return "topic", t.Name, t.Ideas
+	}
+	return "", "", nil
+}
+
+// goalStep finds the next lesson on the way to a goal: every not yet learned
+// prerequisite (transitively, prerequisite edges only) plus the goal itself;
+// of those, the earliest one in program order whose own prerequisites are met.
+func (l *Lab) goalStep(goals []string, mem map[string]FIREMemory) (*Idea, int) {
+	need := map[string]bool{}
+	var walk func(code string)
+	walk = func(code string) {
+		if need[code] || mem[code].Status == "learned" || l.c.Ideas[code] == nil {
+			return
+		}
+		need[code] = true
+		for _, e := range l.c.Ideas[code].Edges {
+			if e.Kind == "prerequisite" {
+				walk(e.Code)
+			}
+		}
+	}
+	for _, g := range goals {
+		walk(g)
+	}
+	var best *Idea
+	for code := range need {
+		i := l.c.Ideas[code]
+		ok := len(i.Questions) > 0
+		for _, e := range i.Edges {
+			if e.Kind == "prerequisite" && need[e.Code] {
+				ok = false
+			}
+		}
+		if !ok {
+			continue
+		}
+		if best == nil || i.Program > best.Program || (i.Program == best.Program && i.order < best.order) {
+			best = i
+		}
+	}
+	return best, len(need)
+}
+
+func (l *Lab) GetPin(ctx context.Context, user int64) (*Pin, error) {
+	var code string
+	if err := l.st.db.QueryRowContext(ctx, `SELECT code FROM pins WHERE user_id=?`, user).Scan(&code); err != nil {
+		return nil, nil
+	}
+	kind, title, codes := l.goalCodes(code)
+	if kind == "" {
+		return nil, nil
+	}
+	mem, err := loadMemory(ctx, l.st.db, user)
+	if err != nil {
+		return nil, err
+	}
+	next, left := l.goalStep(codes, mem)
+	if next == nil {
+		// Reached (or unreachable): the pin has done its job.
+		_, _ = l.st.db.ExecContext(ctx, `DELETE FROM pins WHERE user_id=?`, user)
+		return nil, nil
+	}
+	return &Pin{code, kind, title, left, next.Code}, nil
+}
+
+func (l *Lab) SetPin(ctx context.Context, user int64, code string) error {
+	if code == "" {
+		_, err := l.st.db.ExecContext(ctx, `DELETE FROM pins WHERE user_id=?`, user)
+		return err
+	}
+	if kind, _, _ := l.goalCodes(code); kind == "" {
+		return errNotFound
+	}
+	_, err := l.st.db.ExecContext(ctx, `INSERT INTO pins VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET code=excluded.code, created_at=excluded.created_at`, user, code, time.Now().Unix())
+	return err
 }
 
 func (l *Lab) topicName(i *Idea) string {
@@ -570,11 +638,20 @@ func (l *Lab) Next(ctx context.Context, user int64, track string) ([]TaskView, e
 	}
 	now := time.Now().UTC()
 	out := []TaskView{}
+	pinned := ""
+	if pin, err := l.GetPin(ctx, user); err == nil && pin != nil {
+		i := l.c.Ideas[pin.Next]
+		out = append(out, TaskView{Kind: "lesson", Code: i.Code, Title: i.Name, Topic: l.topicName(i), Level: i.Level, XP: 3 + 3*i.Level, Goal: pin.Title, GoalCode: pin.Code, GoalLeft: pin.Left, GoalKind: pin.Kind})
+		pinned = i.Code
+	}
 	if l.quizDue(ctx, l.st.db, user, mem) {
 		out = append(out, TaskView{Kind: "quiz", Title: "Проверка знаний", XP: 15})
 	}
 	for _, t := range FIRENext(l.c.schedulingIdeas(track), mem, now, 8, false) {
 		i := l.c.ByID[t.IdeaID]
+		if i.Code == pinned {
+			continue
+		}
 		v := TaskView{Kind: t.Kind, Code: i.Code, Title: i.Name, Topic: l.topicName(i), Level: i.Level, XP: 3}
 		if t.Kind == "lesson" {
 			v.XP = 3 + 3*i.Level

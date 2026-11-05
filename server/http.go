@@ -76,6 +76,8 @@ func (a *API) Routes(mux *http.ServeMux) {
 	p := a.prefix + "/api/v1"
 	c := a.lab.c
 	// ---- open API ----
+	// Unknown API paths answer JSON 404 instead of falling through to the app.
+	mux.HandleFunc("GET "+p+"/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, "unknown endpoint") })
 	mux.HandleFunc("GET "+p+"/info", public(func(w http.ResponseWriter, r *http.Request) {
 		counts := map[string]int{}
 		for prog, ideas := range c.Program {
@@ -91,15 +93,14 @@ func (a *API) Routes(mux *http.ServeMux) {
 			return
 		}
 		type ideaRow struct {
-			Code       string  `json:"code"`
-			Name       string  `json:"name"`
-			Level      int     `json:"level"`
-			Weight     float64 `json:"weight"`
-			Interviews int     `json:"interviews"`
+			Code   string  `json:"code"`
+			Name   string  `json:"name"`
+			Level  int     `json:"level"`
+			Weight float64 `json:"weight"`
 		}
 		ideas := map[string]ideaRow{}
 		for _, i := range c.Program[prog] {
-			ideas[i.Code] = ideaRow{i.Code, i.Name, i.Level, i.Weight, i.Interviews}
+			ideas[i.Code] = ideaRow{i.Code, i.Name, i.Level, i.Weight}
 		}
 		writeJSON(w, 200, map[string]any{"program": prog, "sections": secs, "ideas": ideas})
 	}))
@@ -164,10 +165,6 @@ func (a *API) Routes(mux *http.ServeMux) {
 			}
 		}
 		writeJSON(w, 200, out)
-	}))
-	mux.HandleFunc("GET "+p+"/market", public(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		_, _ = w.Write(c.MarketRaw)
 	}))
 	var statsMu sync.Mutex
 	var statsAt time.Time
@@ -286,6 +283,23 @@ func (a *API) Routes(mux *http.ServeMux) {
 			return
 		}
 		writeJSON(w, 200, out)
+	}))
+	mux.HandleFunc("GET "+p+"/pin", a.authed(func(w http.ResponseWriter, r *http.Request, id int64, _ string) {
+		pin, err := a.lab.GetPin(r.Context(), id)
+		a.respond(w, map[string]any{"pin": pin}, err)
+	}))
+	mux.HandleFunc("POST "+p+"/pin", a.authed(func(w http.ResponseWriter, r *http.Request, id int64, _ string) {
+		var body struct{ Code string }
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
+			fail(w, 400, "bad json")
+			return
+		}
+		if err := a.lab.SetPin(r.Context(), id, body.Code); err != nil {
+			a.respond(w, nil, err)
+			return
+		}
+		pin, err := a.lab.GetPin(r.Context(), id)
+		a.respond(w, map[string]any{"pin": pin}, err)
 	}))
 	mux.HandleFunc("GET "+p+"/history", a.authed(func(w http.ResponseWriter, r *http.Request, id int64, _ string) {
 		out, err := a.lab.History(r.Context(), id)

@@ -54,7 +54,9 @@ func main() {
 		w.Header().Set("Cache-Control", "no-cache")
 		http.ServeFile(w, r, filepath.Join(*web, "index.html"))
 	})
-	mux.HandleFunc("GET "+*prefix, func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, *prefix+"/", http.StatusMovedPermanently) })
+	mux.HandleFunc("GET "+*prefix, func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, *prefix+"/", http.StatusMovedPermanently)
+	})
 
 	log.Printf("ml-lab on %s%s (%d ml, %d math ideas)", *addr, *prefix, len(c.Program["ml"]), len(c.Program["math"]))
 	srv := &http.Server{Addr: *addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}

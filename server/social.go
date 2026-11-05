@@ -2,21 +2,18 @@ package main
 
 import (
 	"context"
-	"math"
 	"sort"
 	"time"
 )
 
 type Leader struct {
-	Rank        int     `json:"rank"`
-	Name        string  `json:"name"`
-	XP          int     `json:"xp"`
-	WeekXP      int     `json:"week_xp"`
-	LearnedML   int     `json:"learned_ml"`
-	LearnedMath int     `json:"learned_math"`
-	Coverage    float64 `json:"coverage"`
-	Offers      float64 `json:"offers"`
-	Me          bool    `json:"me,omitempty"`
+	Rank        int    `json:"rank"`
+	Name        string `json:"name"`
+	XP          int    `json:"xp"`
+	WeekXP      int    `json:"week_xp"`
+	LearnedML   int    `json:"learned_ml"`
+	LearnedMath int    `json:"learned_math"`
+	Me          bool   `json:"me,omitempty"`
 }
 
 // Leaders ranks by XP for the period; it reads only nicknames people chose.
@@ -58,17 +55,15 @@ func (l *Lab) Leaders(ctx context.Context, viewer int64, period string) ([]Leade
 			if st.Status != "learned" {
 				continue
 			}
-			if l.c.Ideas[code] != nil && l.c.Ideas[code].Program == "math" {
+			switch i := l.c.Ideas[code]; {
+			case i == nil:
+			case i.Program == "math":
 				r.LearnedMath++
-			} else {
+			default:
 				r.LearnedML++
 			}
 		}
 		r.Rank, r.Me = i+1, r.id == viewer
-		r.Coverage = l.coverage("all", mem)
-		if t, ok := l.c.Market.Tracks["all"]; ok {
-			r.Offers = math.Round(t.Interviews*curveAt(t.Curve.PerInterview, r.Coverage)*100) / 100
-		}
 		out = append(out, r.Leader)
 	}
 	return out, nil
@@ -93,7 +88,6 @@ type Stats struct {
 	} `json:"daily"`
 	// LearnedHistogram: how many learners have learned N ideas, in buckets.
 	LearnedHistogram []Bucket `json:"learned_histogram"`
-	CoverageHistogram []Bucket `json:"coverage_histogram"`
 	// Sections: first-try pass rate per section, only with ≥ minSample attempts.
 	Sections []SectionStat `json:"sections"`
 	Hardest  []IdeaStat    `json:"hardest_ideas"`
@@ -126,7 +120,7 @@ type IdeaStat struct {
 const minSample = 5
 
 func (l *Lab) Stats(ctx context.Context) (*Stats, error) {
-	s := &Stats{GeneratedAt: time.Now().UTC(), MinSample: minSample, LearnedHistogram: []Bucket{}, CoverageHistogram: []Bucket{}, Sections: []SectionStat{}, Hardest: []IdeaStat{}}
+	s := &Stats{GeneratedAt: time.Now().UTC(), MinSample: minSample, LearnedHistogram: []Bucket{}, Sections: []SectionStat{}, Hardest: []IdeaStat{}}
 	db := l.st.db
 	now := time.Now()
 	_ = db.QueryRowContext(ctx, `SELECT count(*) FROM users`).Scan(&s.Users)
@@ -238,9 +232,7 @@ func (l *Lab) Stats(ctx context.Context) (*Stats, error) {
 
 	// Per-learner aggregates go only into buckets; no row identifies a person.
 	learnedEdges := []int{0, 1, 10, 25, 50, 100, 200, 400}
-	coverEdges := []float64{0, 0.1, 0.2, 0.3, 0.5, 0.7, 0.9}
 	lh := make([]int, len(learnedEdges))
-	ch := make([]int, len(coverEdges))
 	urows, err := db.QueryContext(ctx, `SELECT DISTINCT user_id FROM attempts`)
 	if err != nil {
 		return nil, err
@@ -269,13 +261,6 @@ func (l *Lab) Stats(ctx context.Context) (*Stats, error) {
 				break
 			}
 		}
-		c := l.coverage("all", mem)
-		for i := len(coverEdges) - 1; i >= 0; i-- {
-			if c >= coverEdges[i] {
-				ch[i]++
-				break
-			}
-		}
 	}
 	for i, e := range learnedEdges {
 		label := ""
@@ -288,13 +273,6 @@ func (l *Lab) Stats(ctx context.Context) (*Stats, error) {
 			label = itoa(e) + "–" + itoa(learnedEdges[i+1]-1)
 		}
 		s.LearnedHistogram = append(s.LearnedHistogram, Bucket{label, lh[i]})
-	}
-	for i, e := range coverEdges {
-		label := itoa(int(e*100)) + "%+"
-		if i < len(coverEdges)-1 {
-			label = itoa(int(e*100)) + "–" + itoa(int(coverEdges[i+1]*100)) + "%"
-		}
-		s.CoverageHistogram = append(s.CoverageHistogram, Bucket{label, ch[i]})
 	}
 	_ = db.QueryRowContext(ctx, `SELECT coalesce(sum(implicit),0) FROM attempts`).Scan(&s.Implicit.ImplicitCredits)
 	return s, nil

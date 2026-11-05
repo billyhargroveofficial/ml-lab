@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS attempts(id INTEGER PRIMARY KEY, user_id INTEGER NOT 
   finished_at INTEGER, questions TEXT NOT NULL, answers TEXT NOT NULL DEFAULT '[]', correct INTEGER NOT NULL DEFAULT 0, xp INTEGER NOT NULL DEFAULT 0, passed INTEGER, implicit INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS attempts_user ON attempts(user_id, id);
 CREATE TABLE IF NOT EXISTS xp_state(user_id INTEGER PRIMARY KEY, since_quiz INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS pins(user_id INTEGER PRIMARY KEY, code TEXT NOT NULL, created_at INTEGER NOT NULL);
 `
 
 type Store struct{ db *sql.DB }
@@ -116,7 +117,7 @@ func (s *Store) DeleteUser(ctx context.Context, id int64) error {
 		return err
 	}
 	defer tx.Rollback()
-	for _, q := range []string{`DELETE FROM sessions WHERE user_id=?`, `DELETE FROM memory WHERE user_id=?`, `DELETE FROM attempts WHERE user_id=?`, `DELETE FROM xp_state WHERE user_id=?`, `DELETE FROM users WHERE id=?`} {
+	for _, q := range []string{`DELETE FROM sessions WHERE user_id=?`, `DELETE FROM memory WHERE user_id=?`, `DELETE FROM attempts WHERE user_id=?`, `DELETE FROM xp_state WHERE user_id=?`, `DELETE FROM pins WHERE user_id=?`, `DELETE FROM users WHERE id=?`} {
 		if _, err := tx.ExecContext(ctx, q, id); err != nil {
 			return err
 		}

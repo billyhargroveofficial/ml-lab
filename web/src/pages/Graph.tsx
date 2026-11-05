@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useApi, type Edge, type Program } from '../api';
 import { go, Link } from '../App';
 import { fmt } from '../ui/charts';
+import { AnimatePresence, motion, Num, Panel, soft } from '../ui/motion';
+import { PinButton } from '../ui/Pin';
 
 type Row = Edge & { from: string };
 interface Node { code: string; name: string; program: 'ml' | 'math'; section: string; sectionName: string }
@@ -71,21 +73,21 @@ export function GraphPage() {
     {!g ? <p className="skel">загрузка графа</p> : <>
       <Picker g={g} code={code} onPick={select} />
       {g.nodes.has(code) ? <>
-        <section className="panel" style={{ marginBottom: 16 }}>
-          <div className="phead"><h2>{g.nodes.get(code)!.name}</h2><span><Link to={`/idea/${code}`}>карточка идеи →</Link></span></div>
+        <Panel order={1} style={{ marginBottom: 16 }}>
+          <div className="phead"><h2>{g.nodes.get(code)!.name}</h2><span style={{ display: 'inline-flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}><PinButton code={code} /><Link to={`/idea/${code}`}>карточка идеи →</Link></span></div>
           <Ego g={g} code={code} onPick={select} />
           <div className="legend"><span><i style={{ background: 'var(--accent)' }} />пререквизит ML</span><span><i style={{ background: 'var(--ds)' }} />пререквизит математики</span><span><i style={{ background: 'var(--ml)' }} />неявно (ML → мат), пунктир</span><span>толщина и число — вес ребра; у дальних вершин — произведение весов по пути</span></div>
-        </section>
+        </Panel>
         <div className="stats-grid" style={{ marginBottom: 16 }}>
           <Credit g={g} code={code} memory={memory} setMemory={setMemory} onPick={select} />
           <Covers g={g} code={code} onPick={select} />
         </div>
       </> : <p className="alert">Нет идеи с кодом <code>{code}</code>.</p>}
       <Heatmap g={g} />
-      {stats && <section className="panel" style={{ marginTop: 16 }}>
+      {stats && <Panel order={5} style={{ marginTop: 16 }}>
         <div className="phead"><h2>Распределение весов</h2><span>{fmt(stats.pre, 0)} пререквизитов · {fmt(stats.imp, 0)} неявных · {fmt(stats.codex, 0)} от Codex</span></div>
         <WeightHist a={stats.hPre} b={stats.hImp} />
-      </section>}
+      </Panel>}
     </>}
   </div>;
 }
@@ -142,22 +144,22 @@ function Ego({ g, code, onPick }: { g: Graph; code: string; onPick: (c: string) 
   const label = (k: number) => k === 0 ? 'выбрано' : k < 0 ? `опирается, шаг ${-k}` : `закрывает её, шаг ${k}`;
   const lit = (e: Row) => !hover || e.from === hover || e.code === hover;
   return <div ref={ref} style={{ overflowX: 'auto', margin: '0 -16px', padding: '0 16px' }}>
-    <svg width={layout.W} height={layout.H} style={{ display: 'block', minWidth: layout.W }} role="img" aria-label="Граф зависимостей вокруг выбранной идеи">
+    <AnimatePresence mode="wait"><motion.svg key={code} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.12 } }} width={layout.W} height={layout.H} style={{ display: 'block', minWidth: layout.W }} role="img" aria-label="Граф зависимостей вокруг выбранной идеи">
       {layout.keys.map((k, i) => <text key={k} x={i * COL_W + 12} y={14} className="axis" style={{ fill: 'var(--faint)', font: '10px var(--mono)' }}>{label(k)}{layout.hidden.get(k) ? ` · ещё ${layout.hidden.get(k)}` : ''}</text>)}
       {layout.lines.map(({ e, a, b }, i) => {
         const x1 = b.x + BOX_W, y1 = b.y + BOX_H / 2, x2 = a.x, y2 = a.y + BOX_H / 2, mx = (x1 + x2) / 2;
-        return <g key={i} opacity={lit(e) ? 1 : 0.12} style={{ transition: 'opacity .15s' }}>
-          <path d={`M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`} fill="none" stroke={edgeColor(e, g)} strokeWidth={0.6 + e.encompassing * 3.4} strokeOpacity={0.35 + e.encompassing * 0.55} strokeDasharray={e.kind === 'implicit' ? '5 4' : undefined} />
+        return <motion.g key={`${e.from}>${e.code}`} initial={{ opacity: 0 }} animate={{ opacity: lit(e) ? 1 : 0.12 }} transition={{ duration: 0.25, delay: hover ? 0 : 0.15 + Math.min(i, 40) * 0.008 }}>
+          <motion.path initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 0.6, ease: [0.2, 0.8, 0.2, 1], delay: 0.1 + Math.min(i, 40) * 0.008 }} d={`M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`} fill="none" stroke={edgeColor(e, g)} strokeWidth={0.6 + e.encompassing * 3.4} strokeOpacity={0.35 + e.encompassing * 0.55} strokeDasharray={e.kind === 'implicit' ? '5 4' : undefined} />
           {(hover ? lit(e) : e.from === code || e.code === code) && <text x={mx} y={(y1 + y2) / 2 - 3} textAnchor="middle" style={{ font: '10px var(--mono)', fill: 'var(--muted)', paintOrder: 'stroke', stroke: 'var(--panel)', strokeWidth: 3 }}>{e.encompassing.toFixed(2)}</text>}
-        </g>;
+        </motion.g>;
       })}
-      {[...layout.pos].map(([c, p]) => { const n = g.nodes.get(c)!; const sel = c === code; return <g key={c} style={{ cursor: sel ? 'default' : 'pointer' }} onClick={() => !sel && onPick(c)} onPointerEnter={() => setHover(c)} onPointerLeave={() => setHover(null)}>
+      {[...layout.pos].map(([c, p]) => { const n = g.nodes.get(c)!; const sel = c === code; return <motion.g key={c} initial={{ opacity: 0, x: p.depth < 0 ? 16 : p.depth > 0 ? -16 : 0, scale: sel ? 0.9 : 1 }} animate={{ opacity: 1, x: 0, scale: 1 }} transition={{ ...soft, delay: Math.abs(p.depth) * 0.06 }} style={{ cursor: sel ? 'default' : 'pointer', originX: `${p.x + BOX_W / 2}px`, originY: `${p.y + BOX_H / 2}px` }} whileHover={sel ? undefined : { scale: 1.03 }} onClick={() => !sel && onPick(c)} onPointerEnter={() => setHover(c)} onPointerLeave={() => setHover(null)}>
         <rect x={p.x} y={p.y} width={BOX_W} height={BOX_H} rx={5} fill={sel ? 'var(--fg)' : 'var(--bg)'} stroke={sel ? 'var(--fg)' : n.program === 'math' ? 'var(--ds)' : 'var(--line-strong)'} />
         <text x={p.x + 8} y={p.y + 14} style={{ font: '11px var(--mono)', fill: sel ? 'var(--bg)' : 'var(--fg)' }}>{n.name.length > 24 ? n.name.slice(0, 23) + '…' : n.name}</text>
         <text x={p.x + 8} y={p.y + 27} style={{ font: '9.5px var(--mono)', fill: sel ? 'var(--bg)' : 'var(--muted)', opacity: 0.85 }}>{n.program === 'ml' ? 'ML' : 'мат'}{!sel && ` · путь ${p.w.toFixed(2)}`}</text>
         <title>{n.name} — {n.sectionName}</title>
-      </g>; })}
-    </svg>
+      </motion.g>; })}
+    </motion.svg></AnimatePresence>
   </div>;
 }
 
@@ -167,30 +169,30 @@ function Credit({ g, code, memory, setMemory, onPick }: { g: Graph; code: string
   const rows = useMemo(() => [...propagate(g, code, 'down').w].sort((a, b) => b[1] - a[1]), [g, code]);
   const ml = rows.filter(([c]) => g.nodes.get(c)!.program === 'ml').length;
   const total = rows.reduce((s, [, w]) => s + w * (1 - memory), 0);
-  return <section className="panel">
+  return <Panel order={2}>
     <div className="phead"><h2>Неявное повторение</h2><span>{rows.length} тем · ML {ml}, мат {rows.length - ml}</span></div>
-    <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>Если решить эту задачу, каждая тема ниже получит долю повторения <b style={{ color: 'var(--fg)' }}>вес пути × (1 − память)</b>. Сумма — <b style={{ color: 'var(--fg)' }}>{fmt(total, 1)}</b> «повторений даром».</p>
+    <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>Если решить эту задачу, каждая тема ниже получит долю повторения <b style={{ color: 'var(--fg)' }}>вес пути × (1 − память)</b>. Сумма — <b style={{ color: 'var(--fg)' }}><Num value={total} format={v => fmt(v, 1)} /></b> «повторений даром».</p>
     <label className="pace" style={{ marginTop: 0, marginBottom: 10 }}><span>Память простых тем — <b>{Math.round(memory * 100)}%</b></span>
       <input type="range" min={0} max={0.9} step={0.1} value={memory} style={{ '--fill': `${memory / 0.9 * 100}%` } as CSSProperties} onChange={e => setMemory(Number(e.target.value))} aria-label="Память простых тем" /></label>
     {rows.length ? <ul className="edges" style={{ maxHeight: 320, overflow: 'auto' }}>{rows.slice(0, 60).map(([c, w]) => <li key={c} style={{ gridTemplateColumns: 'minmax(0,1fr) 70px 40px' }}>
       <a href={`?idea=${encodeURIComponent(c)}`} onClick={e => { e.preventDefault(); onPick(c); }}>{g.nodes.get(c)!.program === 'math' && <span className="tag">мат</span>} {g.nodes.get(c)!.name}</a>
-      <span className={`w${g.nodes.get(c)!.program === 'math' ? ' math' : ''}`}><i style={{ width: `${w * (1 - memory) * 100}%` }} /></span>
+      <span className={`w${g.nodes.get(c)!.program === 'math' ? ' math' : ''}`}><motion.i animate={{ width: `${w * (1 - memory) * 100}%` }} initial={{ width: 0 }} transition={soft} /></span>
       <span className="num">+{(w * (1 - memory)).toFixed(2)}</span>
     </li>)}</ul> : <p className="empty">Эта тема ни на что не опирается — она лист графа.</p>}
-  </section>;
+  </Panel>;
 }
 
 function Covers({ g, code, onPick }: { g: Graph; code: string; onPick: (c: string) => void }) {
   const rows = useMemo(() => [...propagate(g, code, 'up').w].sort((a, b) => b[1] - a[1]), [g, code]);
   const full = rows.filter(([, w]) => w >= 0.5).length;
-  return <section className="panel">
+  return <Panel order={3}>
     <div className="phead"><h2>Кто её закрывает</h2><span>{rows.length} задач</span></div>
     <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>Решая любую из этих задач, ученик неявно повторяет выбранную тему. С весом ≥ 0,5 — <b style={{ color: 'var(--fg)' }}>{full}</b>: такой урок в ленте заменяет просроченное повторение этой темы.</p>
     {rows.length ? <ul className="edges" style={{ maxHeight: 360, overflow: 'auto' }}>{rows.slice(0, 60).map(([c, w]) => <li key={c} style={{ gridTemplateColumns: 'minmax(0,1fr) 70px 40px' }}>
       <a href={`?idea=${encodeURIComponent(c)}`} onClick={e => { e.preventDefault(); onPick(c); }}>{g.nodes.get(c)!.program === 'math' && <span className="tag">мат</span>} {g.nodes.get(c)!.name}</a>
-      <span className="w"><i style={{ width: `${w * 100}%` }} /></span><span className="num">{w.toFixed(2)}</span>
+      <span className="w"><motion.i initial={{ width: 0 }} animate={{ width: `${w * 100}%` }} transition={soft} /></span><span className="num">{w.toFixed(2)}</span>
     </li>)}</ul> : <p className="empty">Ни одна задача на неё не опирается — это вершина графа.</p>}
-  </section>;
+  </Panel>;
 }
 
 // Section × section: summed encompassing weight of every edge between them.
@@ -209,13 +211,13 @@ function Heatmap({ g }: { g: Graph }) {
   }, [g]);
   const sel = cell ? m.get(`${cell.a}|${cell.b}`) : undefined;
   const short = (s: string) => s.length > 22 ? s.slice(0, 21) + '…' : s;
-  return <section className="panel">
+  return <Panel order={4}>
     <div className="phead"><h2>Разделы → разделы</h2><span>сумма весов рёбер; строка опирается на столбец</span></div>
     <div style={{ overflowX: 'auto', margin: '0 -16px', padding: '0 16px' }}>
       <table style={{ borderCollapse: 'separate', borderSpacing: 2, fontSize: 10 }}>
         <thead><tr><th />{colsIdx.map(c => <th key={c.id} title={c.name} style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', fontWeight: 400, color: c.program === 'math' ? 'var(--ds)' : 'var(--muted)', height: 150, textAlign: 'left', whiteSpace: 'nowrap' }}>{short(c.name)}</th>)}</tr></thead>
         <tbody>{rowsIdx.map(r => <tr key={r.id}><th title={r.name} style={{ textAlign: 'right', fontWeight: 400, whiteSpace: 'nowrap', paddingRight: 6, color: r.program === 'math' ? 'var(--ds)' : 'var(--fg)' }}>{short(r.name)}</th>
-          {colsIdx.map(c => { const v = m.get(`${r.id}|${c.id}`); const t = v ? Math.sqrt(v.sum / max) : 0; const on = cell?.a === r.id && cell?.b === c.id; return <td key={c.id} onClick={() => v && setCell({ a: r.id, b: c.id })} title={v ? `${r.name} → ${c.name}: ${v.n} рёбер, Σ ${fmt(v.sum)}` : ''}
+          {colsIdx.map(c => { const v = m.get(`${r.id}|${c.id}`); const t = v ? Math.sqrt(v.sum / max) : 0; const on = cell?.a === r.id && cell?.b === c.id; return <motion.td key={c.id} initial={{ opacity: 0, scale: 0.6 }} whileInView={{ opacity: 1, scale: 1 }} viewport={{ once: true }} transition={{ ...soft, delay: (rowsIdx.indexOf(r) + colsIdx.indexOf(c)) * 0.012 }} whileHover={v ? { scale: 1.2 } : undefined} onClick={() => v && setCell({ a: r.id, b: c.id })} title={v ? `${r.name} → ${c.name}: ${v.n} рёбер, Σ ${fmt(v.sum)}` : ''}
             style={{ width: 22, minWidth: 22, height: 22, borderRadius: 3, cursor: v ? 'pointer' : 'default', background: v ? `color-mix(in srgb, ${c.program === 'math' && r.program === 'ml' ? 'var(--ml)' : 'var(--accent)'} ${Math.round(12 + t * 88)}%, var(--bg))` : 'var(--sunk)', outline: on ? '2px solid var(--fg)' : undefined }} />; })}
         </tr>)}</tbody>
       </table>
@@ -227,7 +229,7 @@ function Heatmap({ g }: { g: Graph }) {
         <span className="num">{e.encompassing.toFixed(2)}</span>
       </li>)}</ul>
     </div>}
-  </section>;
+  </Panel>;
 }
 
 function WeightHist({ a, b }: { a: number[]; b: number[] }) {
@@ -236,8 +238,8 @@ function WeightHist({ a, b }: { a: number[]; b: number[] }) {
   return <div>
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(10, 1fr)', gap: 6, alignItems: 'end', height: 110 }}>
       {a.map((v, i) => <div key={i} style={{ display: 'flex', gap: 2, alignItems: 'end', height: '100%' }} title={`${(i / 10).toFixed(1)}–${((i + 1) / 10).toFixed(1)}: пререквизитов ${v}, неявных ${b[i]}`}>
-        <i style={{ flex: 1, height: h(v), background: 'var(--accent)', borderRadius: '2px 2px 0 0', minHeight: v ? 2 : 0 }} />
-        <i style={{ flex: 1, height: h(b[i]), background: 'var(--ml)', borderRadius: '2px 2px 0 0', minHeight: b[i] ? 2 : 0 }} />
+        <motion.i initial={{ height: 0 }} animate={{ height: h(v) }} transition={{ ...soft, delay: i * 0.03 }} style={{ flex: 1, background: 'var(--accent)', borderRadius: '2px 2px 0 0', minHeight: v ? 2 : 0 }} />
+        <motion.i initial={{ height: 0 }} animate={{ height: h(b[i]) }} transition={{ ...soft, delay: i * 0.03 + 0.05 }} style={{ flex: 1, background: 'var(--ml)', borderRadius: '2px 2px 0 0', minHeight: b[i] ? 2 : 0 }} />
       </div>)}
     </div>
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(10, 1fr)', gap: 6, fontSize: 10, color: 'var(--faint)', marginTop: 4 }}>{a.map((v, i) => <span key={i}>{(i / 10).toFixed(1)}–{((i + 1) / 10).toFixed(1)}<br /><b style={{ color: 'var(--accent)', fontWeight: 500 }}>{v}</b> · <b style={{ color: 'var(--ml)', fontWeight: 500 }}>{b[i]}</b></span>)}</div>
