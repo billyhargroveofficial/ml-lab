@@ -20,16 +20,26 @@ import (
 const PackFormat = "fire-pack-v1"
 
 type PackFile struct {
-	Format      string      `json:"format"`
-	ID          string      `json:"id"`
-	Title       string      `json:"title"`
-	Language    string      `json:"language,omitempty"`
-	Description string      `json:"description,omitempty"`
-	Topics      []PackTopic `json:"topics"`
+	Format      string         `json:"format"`
+	ID          string         `json:"id"`
+	Title       string         `json:"title"`
+	Language    string         `json:"language,omitempty"`
+	Description string         `json:"description,omitempty"`
+	Categories  []PackCategory `json:"categories,omitempty"`
+	Topics      []PackTopic    `json:"topics"`
+}
+
+// PackCategory groups topics in a big pack (e.g. "Linear algebra"). It is
+// display only: codes and progress do not depend on it.
+type PackCategory struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 }
 
 type PackTopic struct {
 	ID         string     `json:"id"`
+	Category   string     `json:"category,omitempty"`
 	Name       string     `json:"name"`
 	Definition string     `json:"definition,omitempty"`
 	Ideas      []PackIdea `json:"ideas"`
@@ -107,9 +117,27 @@ func checkPack(dir string, p *PackFile) (errs, warns []string) {
 	if len(p.Topics) == 0 {
 		e("no topics")
 	}
+	cats := map[string]bool{}
+	for _, c := range p.Categories {
+		if !slugRe.MatchString(c.ID) || cats[c.ID] {
+			e("category %q: id must be a unique slug", c.ID)
+		}
+		if strings.TrimSpace(c.Name) == "" {
+			e("category %s: name is empty", c.ID)
+		}
+		cats[c.ID] = true
+	}
+	used := map[string]bool{}
 	seenT, seenI := map[string]bool{}, map[string]bool{}
 	for _, t := range p.Topics {
 		where := "topic " + t.ID
+		switch {
+		case len(p.Categories) > 0 && t.Category == "":
+			e("%s: set category (the pack has categories)", where)
+		case t.Category != "" && !cats[t.Category]:
+			e("%s: unknown category %q", where, t.Category)
+		}
+		used[t.Category] = true
 		if !slugRe.MatchString(t.ID) {
 			e("%s: id must be a slug", where)
 		}
@@ -200,6 +228,11 @@ func checkPack(dir string, p *PackFile) (errs, warns []string) {
 					w("%s: every correct answer is option %d — shuffle them", where, first)
 				}
 			}
+		}
+	}
+	for _, c := range p.Categories {
+		if !used[c.ID] {
+			w("category %s has no topics", c.ID)
 		}
 	}
 	return errs, warns

@@ -1,6 +1,7 @@
 import { useApi, type Edge, type Idea, type Program } from '../api';
 import { Link, packTitle, useSession } from '../App';
-import { Panel } from '../ui/motion';
+import { useState } from 'react';
+import { Collapse, motion, Panel, soft } from '../ui/motion';
 import { PinButton } from '../ui/Pin';
 import { md, mdInline } from '../md';
 
@@ -34,11 +35,7 @@ export function IdeaPage({ code }: { code: string }) {
       <div className="col">
         <Panel order={1}><div className="phead"><h2>Урок</h2></div><div className="prose" dangerouslySetInnerHTML={{ __html: md(i.lesson ?? '') }} /></Panel>
         <Panel order={2}><div className="phead"><h2>Вопросы ({i.questions?.length ?? 0})</h2><span>с ответами</span></div>
-          {i.questions?.map((q, n) => <details key={n} style={{ borderTop: n ? '1px dashed var(--line)' : 0, padding: '8px 0' }}>
-            <summary className="prose" style={{ cursor: 'pointer' }}><span dangerouslySetInnerHTML={{ __html: mdInline(q.question) }} /></summary>
-            <ol type="A" style={{ margin: '8px 0', paddingLeft: 22 }}>{q.options.map((o, k) => <li key={k} style={{ color: k === q.correct ? 'var(--good)' : undefined, fontWeight: k === q.correct ? 600 : undefined }} dangerouslySetInnerHTML={{ __html: mdInline(o) }} />)}</ol>
-            {q.explanation && <div className="explain ok prose" dangerouslySetInnerHTML={{ __html: mdInline(q.explanation) }} />}
-          </details>)}
+          <Questions items={i.questions ?? []} />
         </Panel>
       </div>
       <aside className="col">
@@ -54,4 +51,19 @@ export function IdeaPage({ code }: { code: string }) {
       </aside>
     </div>
   </div>;
+}
+
+function Questions({ items }: { items: NonNullable<Idea['questions']> }) {
+  const [open, setOpen] = useState<Set<number>>(() => new Set());
+  const flip = (n: number) => setOpen(s => { const x = new Set(s); if (x.has(n)) x.delete(n); else x.add(n); return x; });
+  return <>{items.map((q, n) => <div className="qitem" key={n}>
+    <button type="button" className="qhead prose" aria-expanded={open.has(n)} onClick={() => flip(n)}>
+      <motion.span className="muted" animate={{ rotate: open.has(n) ? 90 : 0 }} transition={soft} aria-hidden="true">›</motion.span>
+      <span dangerouslySetInnerHTML={{ __html: mdInline(q.question) }} />
+    </button>
+    <Collapse open={open.has(n)}><div style={{ padding: '0 0 12px 22px' }}>
+      <ol type="A" style={{ margin: '0 0 8px', paddingLeft: 22 }}>{q.options.map((o, k) => <motion.li key={k} initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }} transition={{ ...soft, delay: 0.03 * k }} style={{ color: k === q.correct ? 'var(--good)' : undefined, fontWeight: k === q.correct ? 600 : undefined }} dangerouslySetInnerHTML={{ __html: mdInline(o) }} />)}</ol>
+      {q.explanation && <div className="explain ok prose" dangerouslySetInnerHTML={{ __html: mdInline(q.explanation) }} />}
+    </div></Collapse>
+  </div>)}</>;
 }

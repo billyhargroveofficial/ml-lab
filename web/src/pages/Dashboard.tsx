@@ -179,7 +179,7 @@ function Topics({ program, packs, outline, me }: { program: string; packs: PackI
   </>;
 }
 
-interface PlanItem { code: string; name: string; pack: string; topic: string; topic_name: string; level: number; xp: number; state: 'learned' | 'due' | 'available' | 'partial' | 'locked'; waits?: string[] }
+interface PlanItem { code: string; name: string; pack: string; topic: string; topic_name: string; category?: string; level: number; xp: number; state: 'learned' | 'due' | 'available' | 'partial' | 'locked'; waits?: string[] }
 const stateText: Record<PlanItem['state'], string> = { learned: 'выучено', due: 'пора повторить', available: 'можно начать', partial: 'начато', locked: 'закрыто' };
 
 // The whole track at once, grouped by topic: what is done, what is open now
@@ -190,7 +190,9 @@ function Plan({ track, packs, onOpen }: { track: string; packs: PackInfo[]; onOp
   const groups = useMemo(() => {
     const m = new Map<string, { id: string; name: string; items: PlanItem[] }>();
     for (const it of plan.data ?? []) {
-      const g = m.get(it.topic) ?? m.set(it.topic, { id: it.topic, name: it.topic_name, items: [] }).get(it.topic)!;
+      // Big packs group by category, small ones by topic.
+      const key = it.category ? `${it.pack}:${it.category}` : it.topic;
+      const g = m.get(key) ?? m.set(key, { id: key, name: it.category || it.topic_name, items: [] }).get(key)!;
       g.items.push(it);
     }
     return [...m.values()];
@@ -214,7 +216,7 @@ function Plan({ track, packs, onOpen }: { track: string; packs: PackInfo[]; onOp
         </button>
         <Collapse open={open}>{g.items.map(it => <div className="plan-row" key={it.code} data-state={it.state}>
           <span className="dot" aria-hidden="true" />
-          <span><Link to={`/idea/${it.code}`}>{it.name}</Link><small>{stateText[it.state]}{it.state === 'locked' && it.waits?.length ? ` · ждёт: ${it.waits.join(', ')}` : ''} · {it.xp} XP</small></span>
+          <span><Link to={`/idea/${it.code}`}>{it.name}</Link><small>{it.category ? `${it.topic_name} · ` : ''}{stateText[it.state]}{it.state === 'locked' && it.waits?.length ? ` · ждёт: ${it.waits.join(', ')}` : ''} · {it.xp} XP</small></span>
           {it.state === 'available' || it.state === 'partial' ? <button className="btn small" onClick={() => onOpen('lesson', it.code)}>учить</button>
             : it.state === 'due' ? <button className="btn small" onClick={() => onOpen('review', it.code)}>повторить</button>
             : it.state === 'locked' ? <PinButton code={it.code} label="↑ к этому" compact /> : <span />}

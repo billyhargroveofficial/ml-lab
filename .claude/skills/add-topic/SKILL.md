@@ -19,7 +19,7 @@ From the learner's words take: the subject, how many lessons (default 5–7), ho
 
 ## 3. Plan
 
-Write down the lessons in order, each one idea with one skill. Go from the simplest form to the hardest, so each lesson builds on the previous ones. A good pack has a clear ramp: recognise → use → transform → combine → nasty cases. Each idea in the topic usually `requires` the previous one (key), and `uses` earlier ones it exercises.
+Write down the lessons in order, each one idea with one skill. A pack with more than about six topics groups them into `categories` (big areas like «Линейная алгебра»); a small pack does not need them. Go from the simplest form to the hardest, so each lesson builds on the previous ones. A good pack has a clear ramp: recognise → use → transform → combine → nasty cases. Each idea in the topic usually `requires` the previous one (key), and `uses` earlier ones it exercises.
 
 ## 4. Write lessons
 

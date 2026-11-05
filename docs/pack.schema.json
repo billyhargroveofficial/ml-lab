@@ -1,8 +1,37 @@
 {
   "$defs": {
+    "PackCategory": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "description": "One sentence about the category.",
+          "type": "string"
+        },
+        "id": {
+          "description": "Category slug, unique in the pack.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Category title.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "type": "object"
+    },
     "PackFile": {
       "additionalProperties": false,
       "properties": {
+        "categories": {
+          "description": "Optional, for big packs: categories that group topics (e.g. «Линейная алгебра»). Display only — codes and progress do not depend on them. If set, every topic names its category.",
+          "items": {
+            "$ref": "#/$defs/PackCategory"
+          },
+          "type": "array"
+        },
         "description": {
           "description": "One or two sentences: what the learner will be able to do.",
           "type": "string"
@@ -121,6 +150,10 @@
     "PackTopic": {
       "additionalProperties": false,
       "properties": {
+        "category": {
+          "description": "Category id, required when the pack has categories.",
+          "type": "string"
+        },
         "definition": {
           "description": "One sentence about the topic.",
           "type": "string"

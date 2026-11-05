@@ -726,6 +726,7 @@ type PlanItem struct {
 	Pack      string   `json:"pack"`
 	Topic     string   `json:"topic"`
 	TopicName string   `json:"topic_name"`
+	Category  string   `json:"category"`
 	Level     int      `json:"level"`
 	XP        int      `json:"xp"`
 	State     string   `json:"state"` // learned | due | available | partial | locked
@@ -746,6 +747,11 @@ func (l *Lab) Plan(ctx context.Context, user int64, track string) ([]PlanItem, e
 		it := PlanItem{Code: i.Code, Name: i.Name, Pack: i.Program, Topic: i.TopicID, Level: i.Level, XP: 3 + 3*i.Level}
 		if t := l.c.Topics[i.TopicID]; t != nil {
 			it.TopicName = t.Name
+			for _, s := range l.c.Sections[i.Program] {
+				if s.ID == t.SectionID && len(l.c.Sections[i.Program]) > 1 {
+					it.Category = s.Name
+				}
+			}
 		}
 		m := mem[i.Code]
 		switch {

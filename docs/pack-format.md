@@ -4,6 +4,8 @@
 
 A pack is a folder `packs/<id>/` with `pack.json` (format `fire-pack-v1`) and, optionally, lesson files. The app reloads packs within a few seconds of a change. JSON Schema: [`pack.schema.json`](pack.schema.json). A complete small example: [`examples/packs/softmax`](../examples/packs/softmax/pack.json).
 
+Structure: optional **categories** (big groups, display only) → **topics** → **ideas** (one lesson each, with its questions). A small pack can skip categories.
+
 ## PackFile
 
 | Field | Type | Required | Meaning |
@@ -13,13 +15,23 @@ A pack is a folder `packs/<id>/` with `pack.json` (format `fire-pack-v1`) and, o
 | `title` | string | yes | Title shown in the app. |
 | `language` | string | no | Language of lessons, e.g. `ru` or `en`. |
 | `description` | string | no | One or two sentences: what the learner will be able to do. |
+| `categories` | []PackCategory | no | Optional, for big packs: categories that group topics (e.g. «Линейная алгебра»). Display only — codes and progress do not depend on them. If set, every topic names its category. |
 | `topics` | []PackTopic | yes | Topics in teaching order. |
+
+## PackCategory
+
+| Field | Type | Required | Meaning |
+|---|---|---|---|
+| `id` | string | yes | Category slug, unique in the pack. |
+| `name` | string | yes | Category title. |
+| `description` | string | no | One sentence about the category. |
 
 ## PackTopic
 
 | Field | Type | Required | Meaning |
 |---|---|---|---|
 | `id` | string | yes | Topic slug, unique in the pack. The topic code is `<pack>.<topic>`. |
+| `category` | string | no | Category id, required when the pack has categories. |
 | `name` | string | yes | Topic title. |
 | `definition` | string | no | One sentence about the topic. |
 | `ideas` | []PackIdea | yes | Lessons (ideas) in teaching order: earlier ones are offered first. |

@@ -167,18 +167,18 @@ function Ego({ g, code, onPick }: { g: Graph; code: string; onPick: (c: string) 
   const lit = (e: Row) => !hover || e.from === hover || e.code === hover;
   return <div ref={ref} style={{ overflowX: 'auto', margin: '0 -16px', padding: '0 16px' }}>
     <AnimatePresence mode="wait"><motion.svg key={code} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.12 } }} width={layout.W} height={layout.H} style={{ display: 'block', minWidth: layout.W }} role="img" aria-label="Граф зависимостей вокруг выбранной идеи">
-      {layout.keys.map((k, i) => <text key={k} x={i * COL_W + 12} y={14} className="axis" style={{ fill: 'var(--faint)', font: '10px var(--mono)' }}>{label(k)}{layout.hidden.get(k) ? ` · ещё ${layout.hidden.get(k)}` : ''}</text>)}
+      {layout.keys.map((k, i) => <text key={k} x={i * COL_W + 12} y={14} className="axis" style={{ fill: 'var(--faint)', font: '10px var(--font)' }}>{label(k)}{layout.hidden.get(k) ? ` · ещё ${layout.hidden.get(k)}` : ''}</text>)}
       {layout.lines.map(({ e, a, b }, i) => {
         const x1 = b.x + BOX_W, y1 = b.y + BOX_H / 2, x2 = a.x, y2 = a.y + BOX_H / 2, mx = (x1 + x2) / 2;
         return <motion.g key={`${e.from}>${e.code}`} initial={{ opacity: 0 }} animate={{ opacity: lit(e) ? 1 : 0.12 }} transition={{ duration: 0.25, delay: hover ? 0 : 0.15 + Math.min(i, 40) * 0.008 }}>
           <motion.path initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 0.6, ease: [0.2, 0.8, 0.2, 1], delay: 0.1 + Math.min(i, 40) * 0.008 }} d={`M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`} fill="none" stroke={edgeColor(e, g)} strokeWidth={0.6 + e.encompassing * 3.4} strokeOpacity={0.35 + e.encompassing * 0.55} strokeDasharray={e.kind === 'implicit' ? '5 4' : undefined} />
-          {(hover ? lit(e) : e.from === code || e.code === code) && <text x={mx} y={(y1 + y2) / 2 - 3} textAnchor="middle" style={{ font: '10px var(--mono)', fill: 'var(--muted)', paintOrder: 'stroke', stroke: 'var(--panel)', strokeWidth: 3 }}>{e.encompassing.toFixed(2)}</text>}
+          {(hover ? lit(e) : e.from === code || e.code === code) && <text x={mx} y={(y1 + y2) / 2 - 3} textAnchor="middle" style={{ font: '10px var(--font)', fill: 'var(--muted)', paintOrder: 'stroke', stroke: 'var(--panel)', strokeWidth: 3 }}>{e.encompassing.toFixed(2)}</text>}
         </motion.g>;
       })}
       {[...layout.pos].map(([c, p]) => { const n = g.nodes.get(c)!; const sel = c === code; return <motion.g key={c} initial={{ opacity: 0, x: p.depth < 0 ? 16 : p.depth > 0 ? -16 : 0, scale: sel ? 0.9 : 1 }} animate={{ opacity: 1, x: 0, scale: 1 }} transition={{ ...soft, delay: Math.abs(p.depth) * 0.06 }} style={{ cursor: sel ? 'default' : 'pointer', originX: `${p.x + BOX_W / 2}px`, originY: `${p.y + BOX_H / 2}px` }} whileHover={sel ? undefined : { scale: 1.03 }} onClick={() => !sel && onPick(c)} onPointerEnter={() => setHover(c)} onPointerLeave={() => setHover(null)}>
         <rect x={p.x} y={p.y} width={BOX_W} height={BOX_H} rx={5} fill={sel ? 'var(--fg)' : 'var(--bg)'} stroke={sel ? 'var(--fg)' : n.alt ? 'var(--ds)' : 'var(--line-strong)'} />
-        <text x={p.x + 8} y={p.y + 14} style={{ font: '11px var(--mono)', fill: sel ? 'var(--bg)' : 'var(--fg)' }}>{n.name.length > 24 ? n.name.slice(0, 23) + '…' : n.name}</text>
-        <text x={p.x + 8} y={p.y + 27} style={{ font: '9.5px var(--mono)', fill: sel ? 'var(--bg)' : 'var(--muted)', opacity: 0.85 }}>{n.program}{!sel && ` · путь ${p.w.toFixed(2)}`}</text>
+        <text x={p.x + 8} y={p.y + 14} style={{ font: '11px var(--font)', fill: sel ? 'var(--bg)' : 'var(--fg)' }}>{n.name.length > 24 ? n.name.slice(0, 23) + '…' : n.name}</text>
+        <text x={p.x + 8} y={p.y + 27} style={{ font: '9.5px var(--font)', fill: sel ? 'var(--bg)' : 'var(--muted)', opacity: 0.85 }}>{n.program}{!sel && ` · путь ${p.w.toFixed(2)}`}</text>
         <title>{n.name} — {n.sectionName}</title>
       </motion.g>; })}
     </motion.svg></AnimatePresence>

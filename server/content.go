@@ -95,10 +95,23 @@ func buildContent(packs []*PackFile, dirs map[string]string) (*Content, string) 
 		info := &PackInfo{ID: p.ID, Title: p.Title, Description: p.Description, Language: p.Language}
 		c.Packs[p.ID] = info
 		c.Order = append(c.Order, p.ID)
-		sec := &Section{ID: p.ID, Program: p.ID, Name: p.Title, Description: p.Description, Topics: []*Topic{}}
-		c.Sections[p.ID] = []*Section{sec}
+		// Sections are the pack's categories, or one section when it has none.
+		secs := map[string]*Section{}
+		if len(p.Categories) == 0 {
+			secs[""] = &Section{ID: p.ID, Program: p.ID, Name: p.Title, Description: p.Description, Topics: []*Topic{}}
+			c.Sections[p.ID] = []*Section{secs[""]}
+		}
+		for _, cat := range p.Categories {
+			secs[cat.ID] = &Section{ID: p.ID + "." + cat.ID, Program: p.ID, Name: cat.Name, Description: cat.Description, Topics: []*Topic{}}
+			c.Sections[p.ID] = append(c.Sections[p.ID], secs[cat.ID])
+		}
 		for _, t := range p.Topics {
-			top := &Topic{ID: TopicCode(p.ID, t.ID), SectionID: sec.ID, Code: TopicCode(p.ID, t.ID), Name: t.Name, Definition: t.Definition, Ideas: []string{}}
+			sec := secs[t.Category]
+			def := t.Definition
+			if strings.EqualFold(strings.TrimSpace(def), strings.TrimSpace(t.Name)) {
+				def = ""
+			}
+			top := &Topic{ID: TopicCode(p.ID, t.ID), SectionID: sec.ID, Code: TopicCode(p.ID, t.ID), Name: t.Name, Definition: def, Ideas: []string{}}
 			sec.Topics = append(sec.Topics, top)
 			c.Topics[top.ID] = top
 			info.Topics++
@@ -222,5 +235,3 @@ func (c *Content) schedulingIdeas(track string) []FIREIdea {
 
 // weight weighs progress: every idea counts the same.
 func (c *Content) weight(_ *Idea, _ string) float64 { return 1 }
-
-var _ = strings.TrimSpace

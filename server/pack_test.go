@@ -21,7 +21,7 @@ func TestExamplePackIsValid(t *testing.T) {
 
 // Every pack field has a note, so the generated docs and schema are complete.
 func TestFieldNotesCoverPackStructs(t *testing.T) {
-	for _, typ := range []reflect.Type{reflect.TypeOf(PackFile{}), reflect.TypeOf(PackTopic{}), reflect.TypeOf(PackIdea{}), reflect.TypeOf(PackLink{}), reflect.TypeOf(Question{})} {
+	for _, typ := range []reflect.Type{reflect.TypeOf(PackFile{}), reflect.TypeOf(PackCategory{}), reflect.TypeOf(PackTopic{}), reflect.TypeOf(PackIdea{}), reflect.TypeOf(PackLink{}), reflect.TypeOf(Question{})} {
 		for i := 0; i < typ.NumField(); i++ {
 			tag := strings.Split(typ.Field(i).Tag.Get("json"), ",")[0]
 			if fieldNotes[typ.Name()+"."+tag] == "" {

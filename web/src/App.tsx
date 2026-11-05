@@ -31,6 +31,22 @@ function useTheme() {
   return { dark, toggle };
 }
 
+function useFont() {
+  const [font, setFont] = useState<'mono' | 'sans'>(() => { try { return localStorage.getItem('font') === 'sans' ? 'sans' : 'mono'; } catch { return 'mono'; } });
+  useEffect(() => { document.documentElement.dataset.font = font; try { localStorage.setItem('font', font); } catch { /* per-viewer convenience */ } }, [font]);
+  return { font, setFont };
+}
+
+// Reading font switch: each option is drawn in its own font; the pill slides.
+function FontSwitch() {
+  const { font, setFont } = useFont();
+  return <div className="fontsw" role="group" aria-label="Шрифт">{([['mono', 'Mono', 'var(--mono)'], ['sans', 'Aa', 'var(--sans)']] as const).map(([v, l, f]) =>
+    <motion.button key={v} type="button" aria-pressed={font === v} title={v === 'mono' ? 'Моноширинный шрифт' : 'Обычный шрифт'} onClick={() => setFont(v)} whileTap={{ scale: 0.92 }} style={{ fontFamily: f }}>
+      {font === v && <motion.span layoutId="font-pill" className="pill" transition={{ type: 'spring', stiffness: 500, damping: 34 }} />}
+      <motion.span className="lbl" animate={{ y: font === v ? 0 : 1, opacity: font === v ? 1 : 0.7 }}>{l}</motion.span>
+    </motion.button>)}</div>;
+}
+
 export function App() {
   const [path, setPath] = useState(current);
   setPathGlobal = setPath;
@@ -58,6 +74,7 @@ export function App() {
     <header className="top"><div className="wrap">
       <nav className="nav">{nav.map(([to, label]) => <Link key={to} to={to} aria-current={path === to ? 'page' : undefined}>{path === to && <motion.span layoutId="nav-pill" className="nav-pill" transition={{ type: 'spring', stiffness: 420, damping: 36 }} />}<span className="seg-label">{label}</span></Link>)}</nav>
       <span className="spacer" />
+      <FontSwitch />
       <motion.button whileTap={{ scale: 0.9 }} className="iconbtn" aria-label={dark ? 'Светлая тема' : 'Тёмная тема'} title={dark ? 'Светлая тема' : 'Тёмная тема'} onClick={toggle}><AnimatePresence mode="wait" initial={false}><motion.span key={String(dark)} initial={{ rotate: -90, opacity: 0 }} animate={{ rotate: 0, opacity: 1 }} exit={{ rotate: 90, opacity: 0 }} transition={{ duration: 0.18 }}>{dark ? '☀' : '☾'}</motion.span></AnimatePresence></motion.button>
     </div></header>
     <main><AnimatePresence mode="wait" initial={false}><motion.div key={path} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ type: 'spring', stiffness: 300, damping: 32, opacity: { duration: 0.16 } }}>{page}</motion.div></AnimatePresence></main>
