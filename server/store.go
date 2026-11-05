@@ -154,7 +154,7 @@ type querier interface {
 }
 
 func loadMemory(ctx context.Context, q querier, user int64) (map[string]Memory, error) {
-	rows, err := q.QueryContext(ctx, `SELECT code, status, rep, s, d, last_review, due FROM memory WHERE user_id=?`, user)
+	rows, err := q.QueryContext(ctx, `SELECT code, status, rep, s, d, last_review, due, anchor_s, anchor_at FROM memory WHERE user_id=?`, user)
 	if err != nil {
 		return nil, err
 	}
@@ -163,20 +163,23 @@ func loadMemory(ctx context.Context, q querier, user int64) (map[string]Memory, 
 	for rows.Next() {
 		var code string
 		var m Memory
-		var last, due sql.NullInt64
-		if err := rows.Scan(&code, &m.Status, &m.Reps, &m.S, &m.D, &last, &due); err != nil {
+		var last, due, anchorAt sql.NullInt64
+		if err := rows.Scan(&code, &m.Status, &m.Reps, &m.S, &m.D, &last, &due, &m.AnchorS, &anchorAt); err != nil {
 			return nil, err
 		}
-		m.LastReviewAt, m.DueAt = fromUnix(last), fromUnix(due)
+		m.LastReviewAt, m.DueAt, m.AnchorAt = fromUnix(last), fromUnix(due), fromUnix(anchorAt)
+		if m.Status == "learned" && m.AnchorS <= 0 { // rows saved before the anchor existed
+			m.AnchorS, m.AnchorAt = m.S, m.LastReviewAt
+		}
 		out[code] = m
 	}
 	return out, rows.Err()
 }
 
 func saveMemory(ctx context.Context, q querier, user int64, code string, m Memory) error {
-	_, err := q.ExecContext(ctx, `INSERT INTO memory(user_id, code, status, rep, memory, interval, speed, accuracy, last_review, due, s, d) VALUES(?,?,?,?,0,0,0,0,?,?,?,?)
-		ON CONFLICT(user_id, code) DO UPDATE SET status=excluded.status, rep=excluded.rep, last_review=excluded.last_review, due=excluded.due, s=excluded.s, d=excluded.d`,
-		user, code, m.Status, m.Reps, unix(m.LastReviewAt), unix(m.DueAt), m.S, m.D)
+	_, err := q.ExecContext(ctx, `INSERT INTO memory(user_id, code, status, rep, memory, interval, speed, accuracy, last_review, due, s, d, anchor_s, anchor_at) VALUES(?,?,?,?,0,0,0,0,?,?,?,?,?,?)
+		ON CONFLICT(user_id, code) DO UPDATE SET status=excluded.status, rep=excluded.rep, last_review=excluded.last_review, due=excluded.due, s=excluded.s, d=excluded.d, anchor_s=excluded.anchor_s, anchor_at=excluded.anchor_at`,
+		user, code, m.Status, m.Reps, unix(m.LastReviewAt), unix(m.DueAt), m.S, m.D, m.AnchorS, unix(m.AnchorAt))
 	return err
 }
 
@@ -196,15 +199,20 @@ func migrateFSRS(db *sql.DB) error {
 		has[n] = true
 	}
 	rows.Close()
-	if has["s"] {
-		return nil
+	qs := []string{}
+	if !has["s"] {
+		qs = append(qs,
+			`ALTER TABLE memory ADD COLUMN s REAL NOT NULL DEFAULT 0`,
+			`ALTER TABLE memory ADD COLUMN d REAL NOT NULL DEFAULT 5`,
+			`UPDATE memory SET s = max(interval, 1), d = 5 WHERE status='learned'`,
+			`UPDATE memory SET due = last_review + CAST(round(max(interval, 1) * 86400) AS INTEGER) WHERE status='learned' AND last_review IS NOT NULL`)
 	}
-	for _, q := range []string{
-		`ALTER TABLE memory ADD COLUMN s REAL NOT NULL DEFAULT 0`,
-		`ALTER TABLE memory ADD COLUMN d REAL NOT NULL DEFAULT 5`,
-		`UPDATE memory SET s = max(interval, 1), d = 5 WHERE status='learned'`,
-		`UPDATE memory SET due = last_review + CAST(round(max(interval, 1) * 86400) AS INTEGER) WHERE status='learned' AND last_review IS NOT NULL`,
-	} {
+	if !has["anchor_s"] { // the last explicit review; filled from s on load
+		qs = append(qs,
+			`ALTER TABLE memory ADD COLUMN anchor_s REAL NOT NULL DEFAULT 0`,
+			`ALTER TABLE memory ADD COLUMN anchor_at INTEGER`)
+	}
+	for _, q := range qs {
 		if _, err := db.Exec(q); err != nil {
 			return err
 		}

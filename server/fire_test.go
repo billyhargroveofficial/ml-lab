@@ -48,7 +48,7 @@ func TestCreditInterpolatesToGoodReview(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	m := Memory{}.Learn(Good, now)
 	later := now.Add(5 * day)
-	full, gain := m.Credit(1, later)
+	full, gain := m.credit(1, later, false)
 	good := m.Review(Good, later)
 	if math.Abs(full.S-good.S) > 1e-9 {
 		t.Fatalf("credit 1: S=%v, Good review S=%v", full.S, good.S)
@@ -59,8 +59,31 @@ func TestCreditInterpolatesToGoodReview(t *testing.T) {
 	if same, g := m.Credit(0, later); same != m || g != 0 {
 		t.Fatal("zero credit changed memory")
 	}
-	half, _ := m.Credit(0.5, later)
+	half, _ := m.credit(0.5, later, false)
 	if !(half.S > m.S && half.S < good.S) {
 		t.Fatalf("half credit S=%v not between %v and %v", half.S, m.S, good.S)
+	}
+}
+
+// Implicit credit alone cannot push stability past ImplicitCap × the anchor,
+// and an idea living on credit becomes due for an explicit check.
+func TestImplicitCapAndStaleCheck(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	m := Memory{}.Learn(Good, now)
+	at := now
+	for i := 0; i < 40; i++ {
+		at = at.Add(time.Duration(IntervalDays(m.S)) * day)
+		m, _ = m.Credit(1, at)
+	}
+	if limit := ImplicitCap * m.AnchorS; m.S > limit+1e-9 {
+		t.Fatalf("S=%v above cap %v", m.S, limit)
+	}
+	check := m.AnchorAt.Add(time.Duration(IntervalDays(ImplicitCap*m.AnchorS) * float64(day)))
+	if !m.Due(check) || !m.Stale(check) || m.DueAt.After(check) {
+		t.Fatalf("not due for an explicit check at %v (due %v)", check, m.DueAt)
+	}
+	r := m.Review(Good, check)
+	if r.Stale(check) || r.AnchorS != r.S {
+		t.Fatalf("explicit review did not re-anchor: %+v", r)
 	}
 }

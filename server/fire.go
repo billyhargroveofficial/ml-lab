@@ -13,6 +13,13 @@ package main
 // simpler ideas it encompasses. A target reached with path weight w (the
 // product of encompassing weights along the best path) moves its stability
 // and recall the fraction w of the way to what a Good review would give.
+//
+// Guard against inflation: implicit credit alone may raise stability to at
+// most ImplicitCap times the stability of the last explicit review (the
+// anchor), and once the idea has lived on implicit credit for the interval of
+// that capped stability, it is due for an explicit check whatever its recall.
+// Without this, ideas reviewed only through harder ones drift to stabilities
+// of years on the strength of the encompassing weights alone.
 
 import (
 	"math"
@@ -41,6 +48,10 @@ const (
 	maxIntervalDays  = 36500
 	day              = 24 * time.Hour
 )
+
+// ImplicitCap bounds stability gained from implicit credit, as a multiple of
+// the anchor (the stability after the last explicit review).
+var ImplicitCap = 5.0
 
 var (
 	fsrsDecay  = -fsrsW[20]
@@ -112,6 +123,9 @@ type Memory struct {
 	Reps         float64 // explicit reviews plus implicit credit
 	LastReviewAt time.Time
 	DueAt        time.Time
+	// The last explicit review: stability right after it and its time.
+	AnchorS  float64
+	AnchorAt time.Time
 }
 
 func (m Memory) elapsed(now time.Time) float64 {
@@ -130,16 +144,38 @@ func (m Memory) RecallNow(now time.Time) float64 {
 }
 
 func (m Memory) Due(now time.Time) bool {
-	return m.Status == "learned" && m.RecallNow(now) < DesiredRetention
+	return m.Status == "learned" && (m.RecallNow(now) < DesiredRetention || m.Stale(now))
+}
+
+// checkAt is when an idea kept alive by implicit credit needs an explicit
+// review: the interval of the capped stability after the anchor.
+func (m Memory) checkAt() time.Time {
+	if m.AnchorS <= 0 || m.AnchorAt.IsZero() {
+		return time.Time{}
+	}
+	return m.AnchorAt.Add(time.Duration(IntervalDays(ImplicitCap*m.AnchorS) * float64(day)))
+}
+
+// Stale: the idea has gone without an explicit review for too long. Such a
+// review is not replaced by a lesson that covers it.
+func (m Memory) Stale(now time.Time) bool {
+	c := m.checkAt()
+	return m.Status == "learned" && !c.IsZero() && !now.Before(c)
 }
 
 func (m *Memory) schedule() {
 	m.DueAt = m.LastReviewAt.Add(time.Duration(IntervalDays(m.S) * float64(day)))
+	if c := m.checkAt(); !c.IsZero() && c.Before(m.DueAt) {
+		m.DueAt = c
+	}
 }
+
+func (m *Memory) anchor(now time.Time) { m.AnchorS, m.AnchorAt = m.S, now }
 
 // Learn is the first successful lesson.
 func (m Memory) Learn(g Rating, now time.Time) Memory {
 	m.Status, m.S, m.D, m.Reps, m.LastReviewAt = "learned", initialS(g), initialD(g, true), 1, now
+	m.anchor(now)
 	m.schedule()
 	return m
 }
@@ -163,6 +199,7 @@ func (m Memory) Review(g Rating, now time.Time) Memory {
 	if g > Again {
 		m.Reps++
 	}
+	m.anchor(now)
 	m.schedule()
 	return m
 }
@@ -177,7 +214,9 @@ func (m *Memory) setRecall(r float64, now time.Time) {
 
 // Credit applies FIRe's fractional implicit review: the fraction w of a Good
 // review. It returns the gain in recall, which is w·(1 − R).
-func (m Memory) Credit(w float64, now time.Time) (Memory, float64) {
+func (m Memory) Credit(w float64, now time.Time) (Memory, float64) { return m.credit(w, now, true) }
+
+func (m Memory) credit(w float64, now time.Time, capped bool) (Memory, float64) {
 	if m.Status != "learned" || w <= 0 {
 		return m, 0
 	}
@@ -186,7 +225,11 @@ func (m Memory) Credit(w float64, now time.Time) (Memory, float64) {
 	if m.elapsed(now) < 1 {
 		target = shortTermS(m.S, Good)
 	}
-	m.S = clampS(m.S + w*(target-m.S))
+	s := m.S + w*(target-m.S)
+	if capped && m.AnchorS > 0 {
+		s = math.Min(s, math.Max(m.S, ImplicitCap*m.AnchorS))
+	}
+	m.S = clampS(s)
 	gain := w * (1 - r)
 	m.Reps += w
 	m.setRecall(r+gain, now)
@@ -386,6 +429,9 @@ func Next(ideas []FIREIdea, mem map[string]Memory, now time.Time, limit int) []F
 	for _, review := range reviews {
 		covered := false
 		for _, lesson := range lessons {
+			if mem[review.Code].Stale(now) {
+				break
+			}
 			if covers(lesson, review.Code) {
 				add("lesson", lesson)
 				covered = true

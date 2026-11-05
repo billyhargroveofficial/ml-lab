@@ -34,6 +34,7 @@ type scenario struct {
 	// memory: 1 — the encompassing weights are right, 0.5 — twice too
 	// generous, 0 — implicit repetition does not work at all.
 	Alpha float64
+	Cap   float64 // ImplicitCap; 1000 ≈ no guard
 }
 
 type simResult struct {
@@ -61,6 +62,8 @@ func trueRecall(m Memory, k float64, now time.Time) float64 {
 
 func simulate(c *Content, sc scenario, horizon int, seed int64) simResult {
 	rng := rand.New(rand.NewSource(seed))
+	ImplicitCap = sc.Cap
+	defer func() { ImplicitCap = 5 }()
 	ideas := c.schedulingIdeas(sc.Program)
 	inProgram := map[string]bool{}
 	for _, i := range ideas {
@@ -87,7 +90,7 @@ func simulate(c *Content, sc scenario, horizon int, seed int64) simResult {
 		if ok {
 			for target, w := range spread(c.Graph, c.Up, code, false) {
 				if m, have := truth[target]; have && m.Status == "learned" {
-					truth[target], _ = m.Credit(w*sc.Alpha, now)
+					truth[target], _ = m.credit(w*sc.Alpha, now, false) // real memory has no cap
 				}
 			}
 		}
@@ -268,19 +271,25 @@ func TestSimulate(t *testing.T) {
 	average := learner{"средний", 0.82, 1.0}
 	weak := learner{"слабый", 0.68, 0.6}
 	var scs []scenario
+	caps := []float64{1000, 2, 3, 5}
+	if os.Getenv("SIM_FULL") != "" {
+		caps = []float64{5}
+	}
 	for _, p := range []string{"all", "math"} {
-		for _, g := range []int{20, 40, 80} {
-			for _, l := range []learner{strong, average, weak} {
-				scs = append(scs, scenario{p, g, l, false, 1})
+		for _, cp := range caps {
+			for _, a := range []float64{1, 0.5, 0} {
+				scs = append(scs, scenario{p, 40, average, false, a, cp})
 			}
+			scs = append(scs, scenario{p, 40, weak, false, 1, cp})
 		}
-		scs = append(scs,
-			scenario{p, 40, average, false, 0.5},
-			scenario{p, 40, average, false, 0},
-			scenario{p, 40, average, true, 0},
-			scenario{p, 40, weak, false, 0.5},
-			scenario{p, 40, weak, true, 0},
-		)
+		if os.Getenv("SIM_FULL") != "" {
+			for _, g := range []int{20, 80} {
+				for _, l := range []learner{strong, average, weak} {
+					scs = append(scs, scenario{p, g, l, false, 1, 5})
+				}
+			}
+			scs = append(scs, scenario{p, 40, strong, false, 1, 5}, scenario{p, 40, average, true, 0, 5})
+		}
 	}
 	horizon := 720
 	var b strings.Builder
@@ -291,7 +300,7 @@ func TestSimulate(t *testing.T) {
 			rs = append(rs, simulate(c, sc, horizon, seed))
 		}
 		r := average3(rs)
-		fire := fmt.Sprintf("on a=%.1f", sc.Alpha)
+		fire := fmt.Sprintf("on a=%.1f cap=%g", sc.Alpha, sc.Cap)
 		if sc.NoFIRe {
 			fire = "off"
 		}
