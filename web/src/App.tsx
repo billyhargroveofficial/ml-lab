@@ -71,7 +71,7 @@ export function App() {
     </div></header>
     <main><AnimatePresence mode="wait" initial={false}><motion.div key={path} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ type: 'spring', stiffness: 300, damping: 32, opacity: { duration: 0.16 } }}>{page}</motion.div></AnimatePresence></main>
     <footer className="foot"><div className="wrap">
-      <span>ML Lab — открытая программа по ML и математике. Не связан с Math Academy.{session.me && <> · <button className="btn small ghost" style={{ height: 'auto', padding: 0, color: 'inherit' }} onClick={session.remove}>удалить аккаунт</button></>}</span>
+      <span>ML Lab — открытая программа по ML и математике.{session.me && <> · <button className="btn small ghost" style={{ height: 'auto', padding: 0, color: 'inherit' }} onClick={session.remove}>удалить аккаунт</button></>}</span>
       <span><a href="https://github.com/billyhargroveofficial/ml-lab">github</a> · <Link to="/docs">api</Link> · <a href="/ml/data/content.db">content.db</a> · контент CC BY 4.0, код MIT</span>
     </div></footer>
   </SessionCtx.Provider></MotionConfig>;
