@@ -90,7 +90,6 @@ export function Dashboard() {
 
       <aside className="col">
         <section className="panel" aria-label="Прогноз"><ForecastPanel me={m} guest={guest} goal={goal} onGoal={setGoal} market={program === 'ml' ? market.data : undefined} track={mlTrack} /></section>
-        {program === 'ml' && <section className="panel" aria-label="Burning index"><Burning market={market.data} /></section>}
         <section className="panel" aria-label="Темы"><Topics outline={outline.data} me={program === 'ml' ? meAll.data : m} /></section>
         <section className="panel" aria-label="Топ учеников">
           <div className="phead"><h2>Топ</h2><Seg label="Период" value={period} items={[['all', 'всё время'], ['week', '7 дней']]} onChange={setPeriod} /></div>
@@ -184,26 +183,6 @@ function ForecastPanel({ me, guest, goal, onGoal, market, track }: { me?: Me; gu
       {offerEnd && <div><dt>хотя бы 1 оффер</dt><dd>{longDate(offerEnd)}</dd></div>}
       <div><dt>вся программа</dt><dd>{longDate(end)}</dd></div>
     </dl>}
-  </>;
-}
-
-function Burning({ market }: { market?: Market }) {
-  const tiers = market ? [...new Set(market.formats.map(r => r.tier))] : ['до 3 лет', '3+ лет'];
-  const [tier, setTier] = useState(0);
-  const max = Math.max(1, ...(market?.formats.map(r => r.overheat ?? 0) ?? []));
-  const cell = (key: 'ds' | 'ml' | 'ai', remote: boolean) => market?.formats.find(r => r.track === market.tracks[key].name && r.tier === tiers[tier] && r.fmt.includes('удал') === remote);
-  return <>
-    <div className="phead"><h2>Burning index</h2><Seg label="Опыт" value={String(tier)} items={tiers.map((t, i) => [String(i), t] as [string, string])} onChange={v => setTier(Number(v))} /></div>
-    <div className="burn" role="table" aria-label="Перегретость рынка: кандидатов на место относительно IT в целом">
-      <span /><span>удалёнка</span><span>офис</span>
-      {(['ds', 'ml', 'ai'] as const).map(k => <div key={k} style={{ display: 'contents' }} role="row">
-        <span className="tr" style={{ color: TRACK_COLOR[k] }}>{k.toUpperCase()}</span>
-        {[true, false].map(remote => { const r = cell(k, remote); const heat = r?.overheat; return <span key={String(remote)} className={`cell${market ? '' : ' skel'}`} style={{ '--t': heat ? Math.min(1, heat / max) : 0 } as CSSProperties} data-hot={heat && heat / max > 0.55 ? '' : undefined}>
-          <strong>{heat ? `×${fmt(heat)}` : '—'}</strong><small>{r ? `${fmt(r.per_place)} на место` : ' '}</small>
-        </span>; })}
-      </div>)}
-    </div>
-    <p className="muted" style={{ fontSize: 11, margin: '8px 0 0' }}>×1 — средний IT-рынок. Окно с {market?.window_start ?? '…'}.</p>
   </>;
 }
 

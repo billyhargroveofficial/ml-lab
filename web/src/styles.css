@@ -169,15 +169,6 @@ input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border-radius: 
 .legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 11px; color: var(--muted); margin-top: 6px; }
 .legend i { display: inline-block; width: 10px; height: 3px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
 
-/* ---- burning ---- */
-.burn { display: grid; grid-template-columns: 40px 1fr 1fr; gap: 4px; }
-.burn > span { font-size: 11px; color: var(--muted); }
-.burn .cell { border-radius: 5px; padding: 6px 8px; background: color-mix(in srgb, var(--accent) calc(var(--t, 0) * 70%), var(--bg)); border: 1px solid var(--line); }
-.burn .cell strong { display: block; font-size: 15px; }
-.burn .cell[data-hot] { color: #fff; border-color: transparent; }
-.burn .cell[data-hot] small { color: rgba(255, 255, 255, .8); }
-.burn .tr { align-self: center; font-weight: 600; color: var(--fg); font-size: 12px; }
-
 /* ---- topics ---- */
 .topics { display: grid; gap: 7px; }
 .topic { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; font-size: 12px; }
