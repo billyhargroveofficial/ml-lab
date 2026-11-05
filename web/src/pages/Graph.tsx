@@ -103,7 +103,7 @@ export function GraphPage() {
         <Panel order={1} style={{ marginBottom: 16 }}>
           <div className="phead"><h2>{g.nodes.get(code)!.name}</h2><span style={{ display: 'inline-flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}><PinButton code={code} /><Link to={`/idea/${code}`}>карточка идеи →</Link></span></div>
           <GraphCanvas g={g} code={code} down={down} up={up} focus={focus} onPick={select} />
-          <div className="legend"><span><i style={{ background: 'var(--accent)' }} />на что опирается (получает зачёт)</span><span><i style={{ background: 'var(--ds)' }} />что на ней построено</span><span><i style={{ background: 'var(--ml)' }} />uses</span><span>число на ребре — его вес, «путь» — произведение весов до выбранной; колесо — масштаб, перетаскивание — сдвиг, клик — выбрать</span></div>
+          <div className="legend"><span><i style={{ background: 'var(--accent)' }} />на что опирается (получает зачёт)</span><span><i style={{ background: 'var(--ds)' }} />что на ней построено</span><span><i style={{ background: 'var(--ml)' }} />uses</span><span>число на ребре — его вес, «путь» — произведение весов до выбранной; колесо — масштаб, средняя кнопка — сдвиг, клик — выбрать</span></div>
         </Panel>
         <div className="stats-grid" style={{ marginBottom: 16 }}>
           <Credit g={g} code={code} memory={memory} setMemory={setMemory} onPick={select} />

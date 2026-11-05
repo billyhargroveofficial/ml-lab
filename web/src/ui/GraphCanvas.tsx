@@ -89,9 +89,12 @@ export function GraphCanvas({ g, code, down, up, focus, onPick }: { g: GData; co
       const scene = new Container();
       app.stage.addChild(scene);
       const zb = zoom<HTMLCanvasElement, unknown>().scaleExtent([0.05, 2.5])
-        .filter((e: Event) => e.type === 'wheel' || e.type.startsWith('touch') || ((e as MouseEvent).button === 0 && e.type !== 'dblclick'))
+        .filter((e: Event) => e.type === 'wheel' || e.type.startsWith('touch') || ((e as MouseEvent).button === 1 && e.type !== 'dblclick'))
         .on('zoom', (e: D3ZoomEvent<HTMLCanvasElement, unknown>) => { scene.position.set(e.transform.x, e.transform.y); scene.scale.set(e.transform.k); setTip(null); app.render(); });
       select(app.canvas).call(zb).on('dblclick.zoom', null);
+      // Middle button pans; stop the browser's autoscroll on it.
+      app.canvas.addEventListener('mousedown', e => { if (e.button === 1) e.preventDefault(); });
+      app.canvas.addEventListener('auxclick', e => { if (e.button === 1) e.preventDefault(); });
       Object.assign(st.current, { app, scene, zb, ready: true });
       ro.observe(el);
       setBuilt(b => b + 1);
