@@ -7,6 +7,8 @@ Inputs (data/source):
                  math→math prerequisites.
   weights.json — FIRe encompassing weights set by Codex (gpt-6.1-sol):
                  ML idea → math topics and refined ML → ML weights.
+  math_weights.json — FIRe weights of every math → math prerequisite edge,
+                 set by Codex (gpt-6.1-sol) in place of the template 0.3/0.4.
 
 Usage: python3 tools/build_content.py [--out data/content.db]
 """
@@ -20,6 +22,7 @@ out = Path(sys.argv[sys.argv.index('--out') + 1]) if '--out' in sys.argv else RO
 ml = json.load(open(SRC / 'ml.json'))
 math = json.load(open(SRC / 'math.json'))
 weights = json.load(open(SRC / 'weights.json')) if (SRC / 'weights.json').exists() else {'ideas': []}
+math_weights = json.load(open(SRC / 'math_weights.json')) if (SRC / 'math_weights.json').exists() else {'ideas': []}
 
 codes = {i['code'] for i in ml['ideas']} | {i['code'] for i in math['ideas']}
 ml_codes = {i['code'] for i in ml['ideas']}
@@ -42,6 +45,10 @@ for row in weights['ideas']:
     for e in row.get('math', []):
         if e['code'] in codes and e['code'] not in ml_codes:
             cross[(row['code'], e['code'])] = max(cross.get((row['code'], e['code']), 0), clamp(e['w']))
+
+for row in math_weights['ideas']:
+    for e in row['pre']:
+        refined[(row['code'], e['code'])] = clamp(e['w'])
 
 if out.exists():
     out.unlink()
@@ -83,7 +90,7 @@ for (code, prereq), w in sorted(cross.items()):
 meta = {
     'schema': 'ml-lab-content-v1',
     'license': 'CC BY 4.0',
-    'sources': {name: hashlib.sha256((SRC / name).read_bytes()).hexdigest() for name in ['ml.json', 'math.json', 'weights.json'] if (SRC / name).exists()},
+    'sources': {name: hashlib.sha256((SRC / name).read_bytes()).hexdigest() for name in ['ml.json', 'math.json', 'weights.json', 'math_weights.json'] if (SRC / name).exists()},
 }
 db.execute('INSERT INTO meta VALUES(?,?)', ('info', json.dumps(meta, ensure_ascii=False)))
 db.commit()

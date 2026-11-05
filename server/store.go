@@ -39,6 +39,9 @@ func OpenStore(path string) (*Store, error) {
 	if _, err := db.Exec(schema); err != nil {
 		return nil, err
 	}
+	if err := migrateFSRS(db); err != nil {
+		return nil, err
+	}
 	return &Store{db}, nil
 }
 
@@ -150,18 +153,18 @@ type querier interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-func loadMemory(ctx context.Context, q querier, user int64) (map[string]FIREMemory, error) {
-	rows, err := q.QueryContext(ctx, `SELECT code, status, rep, memory, interval, speed, accuracy, last_review, due FROM memory WHERE user_id=?`, user)
+func loadMemory(ctx context.Context, q querier, user int64) (map[string]Memory, error) {
+	rows, err := q.QueryContext(ctx, `SELECT code, status, rep, s, d, last_review, due FROM memory WHERE user_id=?`, user)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := map[string]FIREMemory{}
+	out := map[string]Memory{}
 	for rows.Next() {
 		var code string
-		var m FIREMemory
+		var m Memory
 		var last, due sql.NullInt64
-		if err := rows.Scan(&code, &m.Status, &m.RepNum, &m.Memory, &m.IntervalDays, &m.Speed, &m.Accuracy, &last, &due); err != nil {
+		if err := rows.Scan(&code, &m.Status, &m.Reps, &m.S, &m.D, &last, &due); err != nil {
 			return nil, err
 		}
 		m.LastReviewAt, m.DueAt = fromUnix(last), fromUnix(due)
@@ -170,9 +173,41 @@ func loadMemory(ctx context.Context, q querier, user int64) (map[string]FIREMemo
 	return out, rows.Err()
 }
 
-func saveMemory(ctx context.Context, q querier, user int64, code string, m FIREMemory) error {
-	_, err := q.ExecContext(ctx, `INSERT INTO memory VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id, code) DO UPDATE SET status=excluded.status, rep=excluded.rep,
-		memory=excluded.memory, interval=excluded.interval, speed=excluded.speed, accuracy=excluded.accuracy, last_review=excluded.last_review, due=excluded.due`,
-		user, code, m.Status, m.RepNum, m.Memory, m.IntervalDays, m.Speed, m.Accuracy, unix(m.LastReviewAt), unix(m.DueAt))
+func saveMemory(ctx context.Context, q querier, user int64, code string, m Memory) error {
+	_, err := q.ExecContext(ctx, `INSERT INTO memory(user_id, code, status, rep, memory, interval, speed, accuracy, last_review, due, s, d) VALUES(?,?,?,?,0,0,0,0,?,?,?,?)
+		ON CONFLICT(user_id, code) DO UPDATE SET status=excluded.status, rep=excluded.rep, last_review=excluded.last_review, due=excluded.due, s=excluded.s, d=excluded.d`,
+		user, code, m.Status, m.Reps, unix(m.LastReviewAt), unix(m.DueAt), m.S, m.D)
 	return err
+}
+
+// migrateFSRS adds FSRS stability/difficulty to the memory table and converts
+// progress kept by the old interval model: a learned idea keeps its last
+// review and gets stability equal to its old interval (the old half-life),
+// with neutral difficulty 5.
+func migrateFSRS(db *sql.DB) error {
+	has := map[string]bool{}
+	rows, err := db.Query(`SELECT name FROM pragma_table_info('memory')`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var n string
+		_ = rows.Scan(&n)
+		has[n] = true
+	}
+	rows.Close()
+	if has["s"] {
+		return nil
+	}
+	for _, q := range []string{
+		`ALTER TABLE memory ADD COLUMN s REAL NOT NULL DEFAULT 0`,
+		`ALTER TABLE memory ADD COLUMN d REAL NOT NULL DEFAULT 5`,
+		`UPDATE memory SET s = max(interval, 1), d = 5 WHERE status='learned'`,
+		`UPDATE memory SET due = last_review + CAST(round(max(interval, 1) * 86400) AS INTEGER) WHERE status='learned' AND last_review IS NOT NULL`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useApi, type Edge, type Program } from '../api';
 import { go, Link } from '../App';
 import { fmt } from '../ui/charts';
-import { AnimatePresence, motion, Num, Panel, soft } from '../ui/motion';
+import { AnimatePresence, motion, Num, Panel, Seg, soft } from '../ui/motion';
 import { PinButton } from '../ui/Pin';
 
 type Row = Edge & { from: string };
@@ -10,12 +10,19 @@ interface Node { code: string; name: string; program: 'ml' | 'math'; section: st
 interface Graph { nodes: Map<string, Node>; out: Map<string, Row[]>; inc: Map<string, Row[]>; sections: { id: string; name: string; program: 'ml' | 'math' }[] }
 
 const DEFAULT = 'nlp.attention_transformer/transformer-architecture';
+const DEFAULT_MATH = 'math.c4/t48';
+type View = 'ml' | 'math' | 'all';
+const VIEW_TEXT: Record<View, string> = {
+  ml: 'Только ML-идеи и пререквизиты между ними.',
+  math: 'Только математика: темы и пререквизиты между ними.',
+  all: 'Обе программы вместе: пунктирные рёбра связывают ML-идеи с темами математики, которые они неявно повторяют.',
+};
 const CUTOFF = 0.1;
 
-function build(ml: Program, math: Program, edges: Row[]): Graph {
+function build(ml: Program, math: Program, edges: Row[], view: View): Graph {
   const nodes = new Map<string, Node>();
   const sections: Graph['sections'] = [];
-  for (const p of [ml, math]) for (const s of p.sections) {
+  for (const p of view === 'ml' ? [ml] : view === 'math' ? [math] : [ml, math]) for (const s of p.sections) {
     sections.push({ id: s.id, name: s.name, program: p.program });
     for (const t of s.topics) for (const c of t.ideas) nodes.set(c, { code: c, name: p.ideas[c].name, program: p.program, section: s.id, sectionName: s.name });
   }
@@ -53,23 +60,34 @@ function propagate(g: Graph, start: string, dir: 'down' | 'up') {
 export function GraphPage() {
   const ml = useApi<Program>('/program/ml'), math = useApi<Program>('/program/math');
   const edges = useApi<Row[]>('/edges');
-  const g = useMemo(() => ml.data && math.data && edges.data ? build(ml.data, math.data, edges.data) : undefined, [ml.data, math.data, edges.data]);
-  const [code, setCode] = useState(() => new URLSearchParams(location.search).get('idea') ?? DEFAULT);
-  const select = (c: string) => { setCode(c); history.replaceState(null, '', `?idea=${encodeURIComponent(c)}`); };
+  const params = new URLSearchParams(location.search);
+  const [view, setView] = useState<View>(() => { const v = params.get('view'); return v === 'ml' || v === 'math' ? v : 'all'; });
+  const g = useMemo(() => ml.data && math.data && edges.data ? build(ml.data, math.data, edges.data, view) : undefined, [ml.data, math.data, edges.data, view]);
+  const [code, setCode] = useState(() => params.get('idea') ?? (params.get('view') === 'math' ? DEFAULT_MATH : DEFAULT));
+  const url = (c: string, v: View) => history.replaceState(null, '', `?view=${v}&idea=${encodeURIComponent(c)}`);
+  const select = (c: string) => { setCode(c); url(c, view); };
+  const changeView = (v: View) => {
+    setView(v);
+    // Keep the idea when it belongs to the new view, else jump to a rich one.
+    const fits = v === 'all' || (v === 'math') === code.startsWith('math.');
+    const next = fits ? code : v === 'math' ? DEFAULT_MATH : DEFAULT;
+    setCode(next); url(next, v);
+  };
   const [memory, setMemory] = useState(0.3);
 
   const stats = useMemo(() => {
-    if (!edges.data) return undefined;
-    const by = (k: string) => edges.data!.filter(e => e.kind === k);
+    if (!g) return undefined;
+    const all = [...g.out.values()].flat();
+    const by = (k: string) => all.filter(e => e.kind === k);
     const hist = (rows: Row[]) => Array.from({ length: 10 }, (_, i) => rows.filter(e => Math.min(9, Math.floor(e.encompassing * 10 - 1e-9)) === i).length);
-    return { pre: by('prerequisite').length, imp: by('implicit').length, hPre: hist(by('prerequisite')), hImp: hist(by('implicit')), codex: edges.data.filter(e => e.source.startsWith('codex')).length };
-  }, [edges.data]);
+    return { pre: by('prerequisite').length, imp: by('implicit').length, hPre: hist(by('prerequisite')), hImp: hist(by('implicit')), codex: all.filter(e => e.source.startsWith('codex')).length };
+  }, [g]);
 
   return <div className="wrap page">
     <div className="page-head"><div>
-      <h1>Граф зависимостей</h1>
-      <p className="muted" style={{ margin: '6px 0 0', maxWidth: '78ch' }}>Каждое ребро «сложная → простая» несёт вес <code>encompassing</code>: какую долю повторения простой темы засчитывает успешное решение сложной. Сплошные рёбра — пререквизиты внутри программы, пунктир — неявные связи ML-идей с математикой, которые расставил Codex Sol 6.1.</p>
-    </div></div>
+      <h1>Граф знаний</h1>
+      <p className="muted" style={{ margin: '6px 0 0', maxWidth: '78ch' }}>Каждое ребро «сложная → простая» несёт вес <code>encompassing</code>: какую долю повторения простой темы засчитывает успешное решение сложной. Все веса расставил Codex Sol 6.1. {VIEW_TEXT[view]}</p>
+    </div><Seg big label="Какой граф" value={view} items={[['ml', 'ML'], ['math', 'Математика'], ['all', 'ML + математика']]} onChange={changeView} /></div>
     {!g ? <p className="skel">загрузка графа</p> : <>
       <Picker g={g} code={code} onPick={select} />
       {g.nodes.has(code) ? <>
@@ -99,7 +117,7 @@ function Picker({ g, code, onPick }: { g: Graph; code: string; onPick: (c: strin
     if (n.length < 2) return [];
     return [...g.nodes.values()].filter(x => x.name.toLowerCase().includes(n) || x.code.includes(n)).slice(0, 12);
   }, [q, g]);
-  const rich = useMemo(() => [...g.nodes.values()].filter(n => n.program === 'ml').map(n => ({ n, k: (g.out.get(n.code)?.length ?? 0) + (g.inc.get(n.code)?.length ?? 0) })).sort((a, b) => b.k - a.k).slice(0, 8), [g]);
+  const rich = useMemo(() => [...g.nodes.values()].map(n => ({ n, k: (g.out.get(n.code)?.length ?? 0) + (g.inc.get(n.code)?.length ?? 0) })).sort((a, b) => b.k - a.k).slice(0, 8), [g]);
   return <div style={{ display: 'grid', gap: 8, marginBottom: 16, position: 'relative' }}>
     <input type="search" placeholder="найти идею или тему: бустинг, производная, attention…" value={q} onChange={e => setQ(e.target.value)} aria-label="Поиск идеи" />
     {hits.length > 0 && <div className="panel" style={{ position: 'absolute', top: 38, left: 0, right: 0, zIndex: 5, padding: 6, animation: 'none' }}>

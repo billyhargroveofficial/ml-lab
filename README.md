@@ -3,9 +3,11 @@
 Open trainer for machine learning and math: **427 ML ideas** from metrics and trees
 to transformers and LLMs, and **1293 math topics** from functions and calculus to SVD, convex
 optimisation and statistics. Every idea has a lesson and 3–6 multiple-choice
-questions. Scheduling is FIRe (Fractional Implicit Repetition, from *The Math
-Academy Way*): solving a composite task counts as a partial review of the simpler
-topics it contains, weighted by `encompassing` edges.
+questions. Memory is modelled with FSRS-6 (default parameters of
+[py-fsrs](https://github.com/open-spaced-repetition/py-fsrs), MIT; review when
+recall drops below 90%), and on top of it runs FIRe (Fractional Implicit Repetition,
+from *The Math Academy Way*): solving a composite task counts as a partial review
+of the simpler topics it contains, weighted by `encompassing` edges set by Codex.
 
 Live: https://billyhargrove.ru/ml · API docs: https://billyhargrove.ru/ml/docs
 
@@ -26,7 +28,7 @@ Code is MIT, content is CC BY 4.0 (`data/LICENSE.md`).
 | `server/` | Go: content loader, FIRe (`fire.go`), attempts and progress (`lab.go`), leaderboard and stats (`social.go`), HTTP (`http.go`) |
 | `web/` | React + Vite, monospace UI, light and dark themes |
 | `tools/build_content.py` | `data/source` → `data/content.db` |
-| `tools/codex-weights/` | how the ML → math FIRe weights were produced |
+| `tools/codex-weights/` | how Codex produced the FIRe weights (ML → ML, ML → math; `math/` — math → math) |
 
 ## Run locally
 

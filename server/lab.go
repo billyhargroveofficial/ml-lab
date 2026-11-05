@@ -101,13 +101,13 @@ func (l *Lab) public(q storedQ, pos int) *PublicQuestion {
 	return &PublicQuestion{pos, i.Code, i.Name, x.Question, x.Options}
 }
 
-func (l *Lab) quizDue(ctx context.Context, q querier, user int64, mem map[string]FIREMemory) bool {
+func (l *Lab) quizDue(ctx context.Context, q querier, user int64, mem map[string]Memory) bool {
 	var since int
 	_ = q.QueryRowContext(ctx, `SELECT since_quiz FROM xp_state WHERE user_id=?`, user).Scan(&since)
-	return FIREQuizDue(since) && len(l.quizPool(mem, time.Now())) >= 10
+	return QuizDue(since) && len(l.quizPool(mem, time.Now())) >= 10
 }
 
-func (l *Lab) quizPool(mem map[string]FIREMemory, now time.Time) []storedQ {
+func (l *Lab) quizPool(mem map[string]Memory, now time.Time) []storedQ {
 	type cand struct {
 		q storedQ
 		p float64
@@ -122,7 +122,7 @@ func (l *Lab) quizPool(mem map[string]FIREMemory, now time.Time) []storedQ {
 			continue
 		}
 		for j := range idea.Questions {
-			w := 0.1 + 1 - FIREMemoryNow(st, now)
+			w := 0.1 + 1 - st.RecallNow(now)
 			pool = append(pool, cand{storedQ{Code: code, Index: j}, -math.Log(math.Max(rnd(), 1e-12)) / w})
 		}
 	}
@@ -173,7 +173,7 @@ func (l *Lab) Start(ctx context.Context, user int64, kind, code string) (*Attemp
 					sched.Prerequisites = append(sched.Prerequisites, FIREEdge{Code: e.Code, Encompassing: e.Encompassing})
 				}
 			}
-			if st.Status == "learned" || !FIREFrontier(sched, mem) {
+			if st.Status == "learned" || !Frontier(sched, mem) {
 				return nil, errUnavailable
 			}
 			view.Lesson, view.Partial = idea.Lesson, st.Status == "partial"
@@ -249,7 +249,7 @@ func (l *Lab) Answer(ctx context.Context, user, id int64, choice int) (*AnswerVi
 	done, pass, perfect := false, false, false
 	switch kind {
 	case "lesson":
-		done, pass, perfect = FIRELessonResult(q.Partial, bools)
+		done, pass, perfect = LessonResult(q.Partial, bools)
 		if !done && len(as) == len(qs) {
 			done, pass = true, correct > len(as)-correct
 		}
@@ -274,56 +274,64 @@ func (l *Lab) Answer(ctx context.Context, user, id int64, choice int) (*AnswerVi
 	if err != nil {
 		return nil, err
 	}
-	before := make(map[string]FIREMemory, len(mem))
+	before := make(map[string]Memory, len(mem))
 	for k, v := range mem {
 		before[k] = v
 	}
 	counts := map[string][2]int{}
 	for i, a := range as {
-		code := qs[i].Code
-		st, ok := mem[code]
-		if !ok {
-			st = FIREMemory{Status: "new", Speed: 1, Accuracy: 0.7}
-		}
-		mem[code] = FIREAccuracy(st, a.Correct, l.c.Ideas[code].Level)
-		c := counts[code]
+		c := counts[qs[i].Code]
 		c[1]++
 		if a.Correct {
 			c[0]++
 		}
-		counts[code] = c
+		counts[qs[i].Code] = c
+	}
+	gains := map[string]float64{}
+	addGains := func(g map[string]float64) {
+		for k, v := range g {
+			gains[k] += v
+		}
 	}
 	explicit := map[string]bool{}
-	for code, c := range counts {
+	codes := make([]string, 0, len(counts))
+	for code := range counts {
+		codes = append(codes, code)
+	}
+	sort.Strings(codes)
+	for _, code := range codes {
+		c := counts[code]
 		explicit[code] = true
-		st := mem[code]
+		st, ok := mem[code]
+		if !ok {
+			st = Memory{Status: "new"}
+		}
 		if kind == "lesson" {
 			if pass {
-				mem[code] = FIRECompleteLesson(st, now)
-				FIREPropagate(l.c.Graph, mem, code, 1, now)
+				g := Good
+				if !perfect {
+					g = Hard
+				}
+				mem[code] = st.Learn(g, now)
+				addGains(Propagate(l.c.Graph, l.c.Up, mem, code, true, now))
 			} else {
 				st.Status = "partial"
+				st.Reps = math.Max(st.Reps, 0)
 				mem[code] = st
-				FIREPropagate(l.c.Graph, mem, code, -1, now)
-				FIREKeyReviews(l.c.Graph[code], mem, now)
+				Propagate(l.c.Graph, l.c.Up, mem, code, false, now)
+				KeyReviews(l.c.Graph[code], mem, now)
 			}
 			continue
 		}
-		score := -1.0
-		if c[0] == c[1] {
-			score = 1
-		} else if c[0] > 0 {
-			score = 0.5
-		}
-		mem[code] = FIREReview(st, score, now)
-		FIREPropagate(l.c.Graph, mem, code, score, now)
+		g := RatingFrom(c[0], c[1])
+		mem[code] = st.Review(g, now)
+		addGains(Propagate(l.c.Graph, l.c.Up, mem, code, g > Again, now))
 	}
+	// A quiz error always makes its idea due, whatever the propagation did.
 	if kind == "quiz" {
 		for code, c := range counts {
 			if c[0] < c[1] {
-				st := mem[code]
-				st.Memory, st.LastReviewAt, st.DueAt = 0.4, now, now
-				mem[code] = st
+				mem[code] = mem[code].DueNow(now)
 			}
 		}
 	}
@@ -336,8 +344,8 @@ func (l *Lab) Answer(ctx context.Context, user, id int64, choice int) (*AnswerVi
 		if err := saveMemory(ctx, tx, user, code, st); err != nil {
 			return nil, err
 		}
-		if !explicit[code] && existed && st.RepNum-old.RepNum >= 0.01 {
-			result.Implicit = append(result.Implicit, ImplicitCredit{code, l.c.Ideas[code].Name, math.Round((st.RepNum-old.RepNum)*100) / 100})
+		if g := gains[code]; !explicit[code] && g >= 0.01 && l.c.Ideas[code] != nil {
+			result.Implicit = append(result.Implicit, ImplicitCredit{code, l.c.Ideas[code].Name, math.Round(math.Min(g, 1)*100) / 100})
 		}
 	}
 	sort.Slice(result.Implicit, func(a, b int) bool { return result.Implicit[a].Delta > result.Implicit[b].Delta })
@@ -377,7 +385,8 @@ type MemoryView struct {
 	Code      string     `json:"code"`
 	Status    string     `json:"status"`
 	Rep       float64    `json:"rep"`
-	MemoryNow float64    `json:"memory_now"`
+	MemoryNow float64    `json:"memory_now"` // FSRS recall probability now
+	Stability float64    `json:"stability"`  // FSRS stability, days
 	DueAt     *time.Time `json:"due_at"`
 }
 
@@ -409,17 +418,17 @@ type Me struct {
 	} `json:"forecast"`
 }
 
-func known(st FIREMemory) float64 {
+func known(st Memory) float64 {
 	switch st.Status {
 	case "learned":
 		return 1
 	case "partial":
-		return math.Max(0, math.Min(1, st.RepNum))
+		return math.Max(0, math.Min(1, st.Reps))
 	}
 	return 0
 }
 
-func (l *Lab) coverage(track string, mem map[string]FIREMemory) float64 {
+func (l *Lab) coverage(track string, mem map[string]Memory) float64 {
 	var w, total float64
 	for _, i := range l.c.Program[programOf(track)] {
 		x := l.c.weight(i, track)
@@ -476,11 +485,11 @@ func (l *Lab) Me(ctx context.Context, user int64, name, track string) (*Me, erro
 			d := st.DueAt
 			due = &d
 		}
-		me.Ideas = append(me.Ideas, MemoryView{i.Code, st.Status, math.Round(st.RepNum*100) / 100, math.Round(FIREMemoryNow(st, now)*1000) / 1000, due})
+		me.Ideas = append(me.Ideas, MemoryView{i.Code, st.Status, math.Round(st.Reps*100) / 100, math.Round(st.RecallNow(now)*1000) / 1000, math.Round(st.S*10) / 10, due})
 		if st.Status == "learned" {
 			me.Learned++
 		}
-		if FIREDue(st, now) {
+		if st.Due(now) {
 			me.Due++
 		}
 	}
@@ -504,7 +513,7 @@ func (l *Lab) Me(ctx context.Context, user int64, name, track string) (*Me, erro
 	if total >= 5 {
 		rate = math.Max(0.3, passed/total)
 	}
-	f := FIREEstimate(sched, mem, rate, pace, 0.75, now)
+	f := Estimate(sched, mem, rate, pace, now)
 	me.Forecast.All = Forecast{math.Round(f.RemainingXP), f.Days, f.ETADate}
 	return me, nil
 }
@@ -550,7 +559,7 @@ func (l *Lab) goalCodes(code string) (kind, title string, codes []string) {
 // goalStep finds the next lesson on the way to a goal: every not yet learned
 // prerequisite (transitively, prerequisite edges only) plus the goal itself;
 // of those, the earliest one in program order whose own prerequisites are met.
-func (l *Lab) goalStep(goals []string, mem map[string]FIREMemory) (*Idea, int) {
+func (l *Lab) goalStep(goals []string, mem map[string]Memory) (*Idea, int) {
 	need := map[string]bool{}
 	var walk func(code string)
 	walk = func(code string) {
@@ -647,7 +656,7 @@ func (l *Lab) Next(ctx context.Context, user int64, track string) ([]TaskView, e
 	if l.quizDue(ctx, l.st.db, user, mem) {
 		out = append(out, TaskView{Kind: "quiz", Title: "Проверка знаний", XP: 15})
 	}
-	for _, t := range FIRENext(l.c.schedulingIdeas(track), mem, now, 8, false) {
+	for _, t := range Next(l.c.schedulingIdeas(track), mem, now, 8) {
 		i := l.c.ByID[t.IdeaID]
 		if i.Code == pinned {
 			continue
@@ -656,7 +665,7 @@ func (l *Lab) Next(ctx context.Context, user int64, track string) ([]TaskView, e
 		if t.Kind == "lesson" {
 			v.XP = 3 + 3*i.Level
 			for _, e := range i.Edges {
-				if e.Encompassing >= 0.5 && FIREDue(mem[e.Code], now) {
+				if e.Encompassing >= 0.5 && mem[e.Code].Due(now) {
 					v.Covers = append(v.Covers, l.c.Ideas[e.Code].Name)
 				}
 			}

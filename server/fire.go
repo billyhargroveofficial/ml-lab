@@ -1,126 +1,233 @@
 package main
 
+// Scheduling: FSRS-6 memory for every idea, plus FIRe (fractional implicit
+// repetition) over the knowledge graph.
+//
+// FSRS-6 follows the open specification of open-spaced-repetition
+// (https://github.com/open-spaced-repetition, MIT) with the default
+// parameters of py-fsrs 6.3.2. An idea's memory is its stability S (days
+// until recall drops to 90%) and difficulty D (1–10); recall decays as
+// R(t) = (1 + factor·t/S)^decay. A learned idea is due when R < 0.9.
+//
+// FIRe: solving an idea also counts as a fraction of a Good review of the
+// simpler ideas it encompasses. A target reached with path weight w (the
+// product of encompassing weights along the best path) moves its stability
+// and recall the fraction w of the way to what a Good review would give.
+
 import (
 	"math"
 	"sort"
 	"time"
 )
 
-// FIREMemory is the pure scheduling state of one idea. Times are UTC instants.
-type FIREMemory struct {
-	RepNum, Memory, IntervalDays, Speed, Accuracy float64
-	Status                                        string
-	LastReviewAt                                  time.Time
-	DueAt                                         time.Time
+type Rating int
+
+const (
+	Again Rating = 1
+	Hard  Rating = 2
+	Good  Rating = 3
+	Easy  Rating = 4
+)
+
+var fsrsW = [21]float64{
+	0.212, 1.2931, 2.3065, 8.2956, 6.4133, 0.8334, 3.0194, 0.001,
+	1.8722, 0.1666, 0.796, 1.4835, 0.0614, 0.2629, 1.6483, 0.6014,
+	1.8729, 0.5425, 0.0912, 0.0658, 0.1542,
 }
 
-type FIREEdge struct {
-	Code         string
-	Key          bool
-	Encompassing float64
-}
-type FIREIdea struct {
-	Code, ID      string
-	Level         int
-	Weight        float64
-	Prerequisites []FIREEdge
+const (
+	DesiredRetention = 0.9
+	stabilityMin     = 0.001
+	maxIntervalDays  = 36500
+	day              = 24 * time.Hour
+)
+
+var (
+	fsrsDecay  = -fsrsW[20]
+	fsrsFactor = math.Pow(0.9, 1/fsrsDecay) - 1
+)
+
+func clampS(s float64) float64 { return math.Max(s, stabilityMin) }
+func clampD(d float64) float64 { return math.Min(math.Max(d, 1), 10) }
+
+// Recall after `days` at stability s.
+func Recall(s, days float64) float64 {
+	if s <= 0 {
+		return 0
+	}
+	return math.Pow(1+fsrsFactor*math.Max(0, days)/s, fsrsDecay)
 }
 
-var fireIntervals = [...]float64{1, 3, 7, 14, 30, 60, 120, 240, 365}
+// DaysUntil is the time at which recall falls to r.
+func DaysUntil(s, r float64) float64 { return s / fsrsFactor * (math.Pow(r, 1/fsrsDecay) - 1) }
 
-func FIREInterval(rep float64) float64 {
-	i := int(math.Floor(math.Max(0, rep)))
-	if i >= len(fireIntervals) {
-		i = len(fireIntervals) - 1
-	}
-	return fireIntervals[i]
-}
-func fireClamp(x, lo, hi float64) float64 { return math.Max(lo, math.Min(hi, x)) }
-func FIREMemoryNow(s FIREMemory, now time.Time) float64 {
-	if s.LastReviewAt.IsZero() || s.IntervalDays <= 0 {
-		return fireClamp(s.Memory, 0, 1)
-	}
-	days := math.Max(0, now.Sub(s.LastReviewAt).Hours()/24)
-	return fireClamp(s.Memory, 0, 1) * math.Exp2(-days/s.IntervalDays)
-}
-func FIREDueAt(s FIREMemory) time.Time {
-	if s.LastReviewAt.IsZero() || s.IntervalDays <= 0 {
-		return time.Time{}
-	}
-	if s.Memory <= 0.5 {
-		return s.LastReviewAt
-	}
-	return s.LastReviewAt.Add(time.Duration(s.IntervalDays * math.Log2(s.Memory/0.5) * float64(24*time.Hour)))
-}
-func FIREDue(s FIREMemory, now time.Time) bool {
-	return s.Status == "learned" && FIREMemoryNow(s, now) < 0.5
-}
-func FIREAccuracy(s FIREMemory, correct bool, level int) FIREMemory {
-	value := 0.0
-	if correct {
-		value = 1
-	}
-	s.Accuracy = 0.7*s.Accuracy + 0.3*value
-	difficulty := 0.70
-	if level == 1 {
-		difficulty = 0.85
-	}
-	if level == 3 {
-		difficulty = 0.55
-	}
-	s.Speed = fireClamp(s.Accuracy/difficulty, 0.5, 2)
-	return s
+func IntervalDays(s float64) float64 {
+	return math.Min(math.Max(math.Round(DaysUntil(s, DesiredRetention)), 1), maxIntervalDays)
 }
 
-// FIREReview applies a fractional success or a failure to an existing memory.
-func FIREReview(s FIREMemory, raw float64, now time.Time) FIREMemory {
-	m := FIREMemoryNow(s, now)
-	multiplier := 1.0
-	if raw > 0 {
-		multiplier = 1 - m
-	} else if raw < 0 && s.IntervalDays > 0 && !s.LastReviewAt.IsZero() {
-		overdue := math.Max(0, now.Sub(FIREDueAt(s)).Hours()/24)
-		multiplier += overdue / s.IntervalDays
+func initialS(g Rating) float64 { return clampS(fsrsW[g-1]) }
+func initialD(g Rating, clamp bool) float64 {
+	d := fsrsW[4] - math.Exp(fsrsW[5]*float64(g-1)) + 1
+	if clamp {
+		return clampD(d)
 	}
-	s.RepNum = math.Max(0, s.RepNum+s.Speed*raw*multiplier)
-	if raw < 0 {
-		s.Memory = 0.25
-	} else {
-		s.Memory = fireClamp(m+raw, 0, 1)
-	}
-	s.IntervalDays = FIREInterval(s.RepNum)
-	s.LastReviewAt = now
-	s.DueAt = FIREDueAt(s)
-	return s
-}
-func FIRECompleteLesson(s FIREMemory, now time.Time) FIREMemory {
-	s.Status = "learned"
-	s.RepNum = 1
-	s.Memory = 1
-	s.IntervalDays = FIREInterval(1)
-	s.LastReviewAt = now
-	s.DueAt = FIREDueAt(s)
-	return s
+	return d
 }
 
-// FIRELessonResult reports completion, pass and whether the lesson was perfect.
-func FIRELessonResult(partial bool, answers []bool) (done, passed, perfect bool) {
-	needed := 2
+func nextD(d float64, g Rating) float64 {
+	delta := -fsrsW[6] * float64(g-3)
+	damped := d + (10-d)*delta/9
+	return clampD(fsrsW[7]*initialD(Easy, false) + (1-fsrsW[7])*damped)
+}
+
+func recallS(d, s, r float64, g Rating) float64 {
+	hard, easy := 1.0, 1.0
+	if g == Hard {
+		hard = fsrsW[15]
+	}
+	if g == Easy {
+		easy = fsrsW[16]
+	}
+	return clampS(s * (1 + math.Exp(fsrsW[8])*(11-d)*math.Pow(s, -fsrsW[9])*(math.Exp((1-r)*fsrsW[10])-1)*hard*easy))
+}
+
+func forgetS(d, s, r float64) float64 {
+	long := fsrsW[11] * math.Pow(d, -fsrsW[12]) * (math.Pow(s+1, fsrsW[13]) - 1) * math.Exp((1-r)*fsrsW[14])
+	short := s / math.Exp(fsrsW[17]*fsrsW[18])
+	return clampS(math.Min(long, short))
+}
+
+func shortTermS(s float64, g Rating) float64 {
+	inc := math.Exp(fsrsW[17]*(float64(g)-3+fsrsW[18])) * math.Pow(s, -fsrsW[19])
+	if g >= Hard {
+		inc = math.Max(inc, 1)
+	}
+	return clampS(s * inc)
+}
+
+// Memory is the scheduling state of one idea for one learner.
+type Memory struct {
+	Status       string // new | partial | learned
+	S, D         float64
+	Reps         float64 // explicit reviews plus implicit credit
+	LastReviewAt time.Time
+	DueAt        time.Time
+}
+
+func (m Memory) elapsed(now time.Time) float64 {
+	if m.LastReviewAt.IsZero() {
+		return 0
+	}
+	return math.Max(0, now.Sub(m.LastReviewAt).Hours()/24)
+}
+
+// RecallNow is the probability to recall the idea now (0 if never learned).
+func (m Memory) RecallNow(now time.Time) float64 {
+	if m.Status != "learned" || m.S <= 0 {
+		return 0
+	}
+	return Recall(m.S, m.elapsed(now))
+}
+
+func (m Memory) Due(now time.Time) bool {
+	return m.Status == "learned" && m.RecallNow(now) < DesiredRetention
+}
+
+func (m *Memory) schedule() {
+	m.DueAt = m.LastReviewAt.Add(time.Duration(IntervalDays(m.S) * float64(day)))
+}
+
+// Learn is the first successful lesson.
+func (m Memory) Learn(g Rating, now time.Time) Memory {
+	m.Status, m.S, m.D, m.Reps, m.LastReviewAt = "learned", initialS(g), initialD(g, true), 1, now
+	m.schedule()
+	return m
+}
+
+// Review applies an explicit review (lesson retake, review or quiz).
+func (m Memory) Review(g Rating, now time.Time) Memory {
+	if m.Status != "learned" || m.S <= 0 {
+		return m.Learn(g, now)
+	}
+	r, days := m.RecallNow(now), m.elapsed(now)
+	switch {
+	case days < 1:
+		m.S = shortTermS(m.S, g)
+	case g == Again:
+		m.S = forgetS(m.D, m.S, r)
+	default:
+		m.S = recallS(m.D, m.S, r, g)
+	}
+	m.D = nextD(m.D, g)
+	m.LastReviewAt = now
+	if g > Again {
+		m.Reps++
+	}
+	m.schedule()
+	return m
+}
+
+// setRecall places LastReviewAt so that recall right now equals r at the
+// current stability.
+func (m *Memory) setRecall(r float64, now time.Time) {
+	r = math.Min(math.Max(r, 0.01), 1)
+	m.LastReviewAt = now.Add(-time.Duration(DaysUntil(m.S, r) * float64(day)))
+	m.schedule()
+}
+
+// Credit applies FIRe's fractional implicit review: the fraction w of a Good
+// review. It returns the gain in recall, which is w·(1 − R).
+func (m Memory) Credit(w float64, now time.Time) (Memory, float64) {
+	if m.Status != "learned" || w <= 0 {
+		return m, 0
+	}
+	r := m.RecallNow(now)
+	target := recallS(m.D, m.S, r, Good)
+	if m.elapsed(now) < 1 {
+		target = shortTermS(m.S, Good)
+	}
+	m.S = clampS(m.S + w*(target-m.S))
+	gain := w * (1 - r)
+	m.Reps += w
+	m.setRecall(r+gain, now)
+	return m, gain
+}
+
+// Weaken applies the fraction w of a failure to an idea built on a failed one.
+func (m Memory) Weaken(w float64, now time.Time) Memory {
+	if m.Status != "learned" || w <= 0 {
+		return m
+	}
+	r := m.RecallNow(now)
+	m.S = clampS(m.S + w*(forgetS(m.D, m.S, r)-m.S))
+	m.setRecall(r, now)
+	return m
+}
+
+// DueNow makes a learned idea due immediately (key prerequisites of a failed
+// lesson, ideas missed in a quiz).
+func (m Memory) DueNow(now time.Time) Memory {
+	if m.Status == "learned" {
+		m.setRecall(DesiredRetention-0.001, now)
+	}
+	return m
+}
+
+// LessonResult: a lesson passes on two right answers in a row (one when it
+// was started before) and fails on two wrong in a row.
+func LessonResult(partial bool, answers []bool) (done, passed, perfect bool) {
+	need, right, wrong := 2, 0, 0
 	if partial {
-		needed = 1
+		need = 1
 	}
-	correct, wrong := 0, 0
 	perfect = true
-	for _, answer := range answers {
-		if answer {
-			correct++
-			wrong = 0
+	for _, a := range answers {
+		if a {
+			right, wrong = right+1, 0
 		} else {
-			wrong++
-			correct = 0
-			perfect = false
+			wrong, right, perfect = wrong+1, 0, false
 		}
-		if correct >= needed {
+		if right >= need {
 			return true, true, perfect
 		}
 		if wrong >= 2 {
@@ -129,96 +236,116 @@ func FIRELessonResult(partial bool, answers []bool) (done, passed, perfect bool)
 	}
 	return false, false, perfect
 }
-func FIREFrontier(idea FIREIdea, memory map[string]FIREMemory) bool {
-	for _, edge := range idea.Prerequisites {
-		m := memory[edge.Code]
-		if m.Status != "learned" && !(m.Status == "partial" && m.RepNum >= 0.5) {
+
+// RatingFrom maps answers to a rating: all right is Good, most right Hard.
+func RatingFrom(correct, total int) Rating {
+	switch {
+	case total == 0:
+		return Again
+	case correct == total:
+		return Good
+	case float64(correct)/float64(total) >= 0.5:
+		return Hard
+	}
+	return Again
+}
+
+// ---- the knowledge graph ----
+
+type FIREEdge struct {
+	Code         string
+	Key          bool
+	Encompassing float64
+}
+
+type FIREIdea struct {
+	Code, ID      string
+	Level         int
+	Weight        float64
+	Prerequisites []FIREEdge
+}
+
+// spread returns the best-path weight to every idea reached from code: down
+// the prerequisites (credit) or up to the dependents (failure). Paths below
+// 0.1 stop.
+func spread(graph map[string]FIREIdea, dependents map[string][]FIREEdge, code string, up bool) map[string]float64 {
+	weights := map[string]float64{code: 1}
+	queue := []string{code}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		edges := graph[cur].Prerequisites
+		if up {
+			edges = dependents[cur]
+		}
+		for _, e := range edges {
+			w := weights[cur] * e.Encompassing
+			if w < 0.1 || w <= weights[e.Code] {
+				continue
+			}
+			weights[e.Code] = w
+			queue = append(queue, e.Code)
+		}
+	}
+	delete(weights, code)
+	return weights
+}
+
+// Propagate spreads a successful solve (credit down) or a failure (weakening
+// up) and returns the recall gain per credited idea.
+func Propagate(graph map[string]FIREIdea, dependents map[string][]FIREEdge, mem map[string]Memory, code string, success bool, now time.Time) map[string]float64 {
+	gains := map[string]float64{}
+	for target, w := range spread(graph, dependents, code, !success) {
+		m, ok := mem[target]
+		if !ok || m.Status != "learned" {
+			continue
+		}
+		if success {
+			var g float64
+			m, g = m.Credit(w, now)
+			gains[target] = g
+		} else {
+			m = m.Weaken(w, now)
+		}
+		mem[target] = m
+	}
+	return gains
+}
+
+func KeyReviews(idea FIREIdea, mem map[string]Memory, now time.Time) {
+	for _, e := range idea.Prerequisites {
+		if m, ok := mem[e.Code]; e.Key && ok && m.Status == "learned" {
+			mem[e.Code] = m.DueNow(now)
+		}
+	}
+}
+
+func Frontier(idea FIREIdea, mem map[string]Memory) bool {
+	for _, e := range idea.Prerequisites {
+		m := mem[e.Code]
+		if m.Status != "learned" && !(m.Status == "partial" && m.Reps >= 0.5) {
 			return false
 		}
 	}
 	return true
 }
 
-// FIREPropagate applies the maximum-weight path to each node once. Graphs are
-// expected to have already passed the content importer's cycle validation.
-func FIREPropagate(ideas map[string]FIREIdea, memory map[string]FIREMemory, code string, raw float64, now time.Time) {
-	weights := map[string]float64{code: 1}
-	queue := []string{code}
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
-		edges := ideas[current].Prerequisites
-		if raw < 0 {
-			edges = nil
-			for child, idea := range ideas {
-				for _, e := range idea.Prerequisites {
-					if e.Code == current {
-						edges = append(edges, FIREEdge{Code: child, Encompassing: e.Encompassing})
-					}
-				}
-			}
-		}
-		for _, edge := range edges {
-			w := weights[current] * edge.Encompassing
-			if w < 0.1 || w <= weights[edge.Code] {
-				continue
-			}
-			weights[edge.Code] = w
-			queue = append(queue, edge.Code)
-		}
-	}
-	delete(weights, code)
-	for target, weight := range weights {
-		s, ok := memory[target]
-		if !ok || s.Status != "learned" {
-			continue
-		}
-		if raw > 0 {
-			if s.Speed < 1 {
-				continue
-			}
-			s = FIREReview(s, raw*weight, now)
-		} else if raw < 0 {
-			s.Memory = math.Max(0, FIREMemoryNow(s, now)-0.5*weight)
-			s.LastReviewAt = now
-			s.DueAt = FIREDueAt(s)
-		}
-		memory[target] = s
-	}
-}
-func FIREKeyReviews(idea FIREIdea, memory map[string]FIREMemory, now time.Time) {
-	for _, edge := range idea.Prerequisites {
-		if !edge.Key {
-			continue
-		}
-		s, ok := memory[edge.Code]
-		if ok && s.Status == "learned" {
-			s.Memory = math.Min(FIREMemoryNow(s, now), 0.4)
-			s.LastReviewAt = now
-			s.DueAt = now
-			memory[edge.Code] = s
-		}
-	}
-}
-
 type FIRETask struct{ Kind, IdeaID string }
 
-// FIRENext produces at most limit tasks with a lesson share of at least 25%
-// whenever enough frontier lessons exist. Covered reviews yield to lessons.
-func FIRENext(ideas []FIREIdea, memory map[string]FIREMemory, now time.Time, limit int, quizDue bool) []FIRETask {
+// Next produces at most limit tasks: due reviews, except those a frontier
+// lesson covers with weight ≥ 0.5 (the lesson replaces the review), and at
+// least a quarter new lessons, heaviest ideas first.
+func Next(ideas []FIREIdea, mem map[string]Memory, now time.Time, limit int) []FIRETask {
 	if limit <= 0 {
 		return nil
 	}
-	if quizDue {
-		return []FIRETask{{Kind: "quiz"}}
-	}
 	lessons, reviews := []FIREIdea{}, []FIREIdea{}
 	for _, idea := range ideas {
-		m := memory[idea.Code]
-		if (m.Status == "" || m.Status == "new" || m.Status == "partial") && FIREFrontier(idea, memory) {
+		m := mem[idea.Code]
+		if (m.Status == "" || m.Status == "new" || m.Status == "partial") && Frontier(idea, mem) {
 			lessons = append(lessons, idea)
 		}
-		if FIREDue(m, now) {
+		if m.Due(now) {
 			reviews = append(reviews, idea)
 		}
 	}
@@ -232,7 +359,14 @@ func FIRENext(ideas []FIREIdea, memory map[string]FIREMemory, now time.Time, lim
 		return a.ID < b.ID
 	}
 	sort.Slice(lessons, func(i, j int) bool { return less(lessons[i], lessons[j]) })
-	sort.Slice(reviews, func(i, j int) bool { return less(reviews[i], reviews[j]) })
+	// The most forgotten reviews first.
+	sort.Slice(reviews, func(i, j int) bool {
+		ri, rj := mem[reviews[i].Code].RecallNow(now), mem[reviews[j].Code].RecallNow(now)
+		if ri != rj {
+			return ri < rj
+		}
+		return less(reviews[i], reviews[j])
+	})
 	selected := map[string]bool{}
 	tasks := []FIRETask{}
 	add := func(kind string, idea FIREIdea) {
@@ -241,35 +375,32 @@ func FIRENext(ideas []FIREIdea, memory map[string]FIREMemory, now time.Time, lim
 			selected[idea.ID] = true
 		}
 	}
-	for _, review := range reviews {
-		for _, lesson := range lessons {
-			for _, edge := range lesson.Prerequisites {
-				if edge.Code == review.Code && edge.Encompassing >= 0.5 {
-					add("lesson", lesson)
-				}
+	covers := func(lesson FIREIdea, code string) bool {
+		for _, e := range lesson.Prerequisites {
+			if e.Code == code && e.Encompassing >= 0.5 {
+				return true
 			}
 		}
-		if len(tasks) < limit {
-			covered := false
-			for _, lesson := range lessons {
-				if selected[lesson.ID] {
-					for _, edge := range lesson.Prerequisites {
-						if edge.Code == review.Code && edge.Encompassing >= 0.5 {
-							covered = true
-						}
-					}
-				}
+		return false
+	}
+	for _, review := range reviews {
+		covered := false
+		for _, lesson := range lessons {
+			if covers(lesson, review.Code) {
+				add("lesson", lesson)
+				covered = true
+				break
 			}
-			if !covered {
-				add("review", review)
-			}
+		}
+		if !covered {
+			add("review", review)
 		}
 	}
 	minLessons := (min(limit, len(reviews)+len(lessons)) + 3) / 4
 	for _, lesson := range lessons {
 		count := 0
-		for _, task := range tasks {
-			if task.Kind == "lesson" {
+		for _, t := range tasks {
+			if t.Kind == "lesson" {
 				count++
 			}
 		}
@@ -298,41 +429,28 @@ type FIREForecast struct {
 	ETADate                 time.Time
 }
 
-func FIREEstimate(ideas []FIREIdea, memory map[string]FIREMemory, passRate, pace, quizMean float64, now time.Time) FIREForecast {
+// Estimate is the XP left to learn every idea and to bring each one to about
+// four successful reviews, at the given pass rate and daily pace.
+func Estimate(ideas []FIREIdea, mem map[string]Memory, passRate, pace float64, now time.Time) FIREForecast {
 	if passRate <= 0 || passRate > 1 {
 		passRate = 0.85
 	}
 	if pace <= 0 {
 		pace = 20
 	}
-	if quizMean < 0 || quizMean > 1 {
-		quizMean = 0.75
-	}
 	remaining := 0.0
 	for _, idea := range ideas {
-		s := memory[idea.Code]
-		rep := s.RepNum
-		if s.Status != "learned" {
-			xp := 9.0
-			if idea.Level == 1 {
-				xp = 6
-			}
-			if idea.Level == 3 {
-				xp = 12
-			}
-			remaining += xp / passRate
-			rep = 1
+		m := mem[idea.Code]
+		reps := m.Reps
+		if m.Status != "learned" {
+			remaining += float64(3+3*idea.Level) / passRate
+			reps = 1
 		}
-		speed := s.Speed
-		if speed <= 0 {
-			speed = 1
-		}
-		remaining += 3 * math.Max(0, 4-rep) / speed / passRate
+		remaining += 3 * math.Max(0, 4-reps) / passRate
 	}
-	remaining += remaining / 150 * 15 * (2 - quizMean)
+	remaining += remaining / 150 * 15 * 0.25
 	days := remaining / (pace * math.Pow(pace/40, 0.1))
-	return FIREForecast{remaining, pace, days, now.Add(time.Duration(days * float64(24*time.Hour)))}
+	return FIREForecast{remaining, pace, days, now.Add(time.Duration(days * float64(day)))}
 }
 
-// FIREQuizDue uses XP earned in ML Lab since the last completed quiz.
-func FIREQuizDue(xpSinceQuiz int) bool { return xpSinceQuiz >= 150 }
+func QuizDue(xpSinceQuiz int) bool { return xpSinceQuiz >= 150 }

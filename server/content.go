@@ -63,8 +63,9 @@ type Content struct {
 	Ideas    map[string]*Idea      // by code
 	Topics   map[string]*Topic     // by id
 	ByID     map[string]*Idea
-	Program  map[string][]*Idea  // by program, in order
-	Graph    map[string]FIREIdea // full graph incl. implicit edges, for propagation
+	Program  map[string][]*Idea    // by program, in order
+	Graph    map[string]FIREIdea   // full graph incl. implicit edges, for propagation
+	Up       map[string][]FIREEdge // reverse edges: idea → ideas built on it
 }
 
 func LoadContent(path string) (*Content, error) {
@@ -73,7 +74,7 @@ func LoadContent(path string) (*Content, error) {
 		return nil, err
 	}
 	defer db.Close()
-	c := &Content{Sections: map[string][]*Section{}, Ideas: map[string]*Idea{}, Topics: map[string]*Topic{}, ByID: map[string]*Idea{}, Program: map[string][]*Idea{}, Graph: map[string]FIREIdea{}}
+	c := &Content{Sections: map[string][]*Section{}, Ideas: map[string]*Idea{}, Topics: map[string]*Topic{}, ByID: map[string]*Idea{}, Up: map[string][]FIREEdge{}, Program: map[string][]*Idea{}, Graph: map[string]FIREIdea{}}
 	var info string
 	if err := db.QueryRow(`SELECT value FROM meta WHERE key='info'`).Scan(&info); err != nil {
 		return nil, fmt.Errorf("meta: %w", err)
@@ -157,6 +158,9 @@ func LoadContent(path string) (*Content, error) {
 			g.Prerequisites = append(g.Prerequisites, FIREEdge{Code: e.Code, Key: e.Key, Encompassing: e.Encompassing})
 		}
 		c.Graph[code] = g
+		for _, e := range i.Edges {
+			c.Up[e.Code] = append(c.Up[e.Code], FIREEdge{Code: code, Key: e.Key, Encompassing: e.Encompassing})
+		}
 	}
 	return c, nil
 }
