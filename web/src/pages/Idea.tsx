@@ -51,7 +51,7 @@ export function IdeaPage({ code }: { code: string }) {
             <div className="meter" style={{ position: 'relative', marginTop: 4 }}><i style={{ width: `${s.share}%`, background: TRACK_COLOR[t] }} /></div>
           </div>; })}
         </section>}
-        <section className="panel"><div className="phead"><h2>Опирается на</h2><span>вес = доля повторения</span></div>
+        <section className="panel"><div className="phead"><h2>Опирается на</h2><Link to={`/graph?idea=${encodeURIComponent(i.code)}`}>граф →</Link></div>
           <EdgeList edges={pre} names={names} empty="Стартовая идея — без пререквизитов." />
           {imp.length > 0 && <><div className="phead" style={{ marginTop: 14 }}><h2>Неявно повторяет</h2><span>Codex Sol 6.1</span></div><EdgeList edges={imp} names={names} empty="" /></>}
           <p className="muted" style={{ fontSize: 11, marginBottom: 0 }}>* ключевой пререквизит: провал урока отправляет его на повторение.</p>

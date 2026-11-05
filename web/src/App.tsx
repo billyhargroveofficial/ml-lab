@@ -5,6 +5,7 @@ import { Docs } from './pages/Docs';
 import { StatsPage } from './pages/Stats';
 import { ProgramPage } from './pages/Program';
 import { IdeaPage } from './pages/Idea';
+import { GraphPage } from './pages/Graph';
 
 // ---- routing: everything lives under /ml ----
 const ROOT = '/ml';
@@ -46,7 +47,7 @@ export function App() {
   };
   const { dark, toggle } = useTheme();
   useEffect(() => {
-    const titles: Record<string, string> = { '/docs': 'API · ML Lab', '/stats': 'Статистика · ML Lab', '/program': 'Программа · ML Lab' };
+    const titles: Record<string, string> = { '/docs': 'API · ML Lab', '/stats': 'Статистика · ML Lab', '/program': 'Программа · ML Lab', '/graph': 'Граф · ML Lab' };
     document.title = titles[path] ?? 'ML Lab';
   }, [path]);
 
@@ -55,9 +56,10 @@ export function App() {
   else if (path === '/docs') page = <Docs />;
   else if (path === '/stats') page = <StatsPage />;
   else if (path === '/program') page = <ProgramPage />;
+  else if (path === '/graph') page = <GraphPage />;
   else if (path.startsWith('/idea/')) page = <IdeaPage code={path.slice(6)} />;
   else page = <div className="wrap page"><h1>404</h1><p className="muted">Такой страницы нет. <Link to="/">На главную</Link></p></div>;
-  const nav = [['/', 'учиться'], ['/program', 'программа'], ['/stats', 'статистика'], ['/docs', 'api']] as const;
+  const nav = [['/', 'учиться'], ['/program', 'программа'], ['/graph', 'граф'], ['/stats', 'статистика'], ['/docs', 'api']] as const;
 
   return <SessionCtx.Provider value={session}>
     <header className="top"><div className="wrap">

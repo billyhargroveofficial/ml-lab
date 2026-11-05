@@ -247,7 +247,7 @@ input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border-radius: 
 .implicit ul { list-style: none; margin: 8px 0 0; padding: 0; max-height: 200px; overflow: auto; }
 
 /* ---- program / idea / docs pages ---- */
-.page { padding: 28px 0 60px; }
+.page { padding-top: 28px; padding-bottom: 60px; }
 .page-head { display: flex; justify-content: space-between; align-items: end; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
 .page-head h1 { font-size: 26px; letter-spacing: -.03em; }
 .sec { margin-bottom: 18px; }

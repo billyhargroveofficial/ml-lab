@@ -1,0 +1,246 @@
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useApi, type Edge, type Program } from '../api';
+import { go, Link } from '../App';
+import { fmt } from '../ui/charts';
+
+type Row = Edge & { from: string };
+interface Node { code: string; name: string; program: 'ml' | 'math'; section: string; sectionName: string }
+interface Graph { nodes: Map<string, Node>; out: Map<string, Row[]>; inc: Map<string, Row[]>; sections: { id: string; name: string; program: 'ml' | 'math' }[] }
+
+const DEFAULT = 'nlp.attention_transformer/transformer-architecture';
+const CUTOFF = 0.1;
+
+function build(ml: Program, math: Program, edges: Row[]): Graph {
+  const nodes = new Map<string, Node>();
+  const sections: Graph['sections'] = [];
+  for (const p of [ml, math]) for (const s of p.sections) {
+    sections.push({ id: s.id, name: s.name, program: p.program });
+    for (const t of s.topics) for (const c of t.ideas) nodes.set(c, { code: c, name: p.ideas[c].name, program: p.program, section: s.id, sectionName: s.name });
+  }
+  const out = new Map<string, Row[]>(), inc = new Map<string, Row[]>();
+  for (const e of edges) {
+    if (!nodes.has(e.from) || !nodes.has(e.code)) continue;
+    (out.get(e.from) ?? out.set(e.from, []).get(e.from)!).push(e);
+    (inc.get(e.code) ?? inc.set(e.code, []).get(e.code)!).push(e);
+  }
+  return { nodes, out, inc, sections };
+}
+
+// The same walk as the server's FIREPropagate: every node gets the weight of
+// its best path (product of encompassing weights), paths below 0.1 stop.
+function propagate(g: Graph, start: string, dir: 'down' | 'up') {
+  const w = new Map<string, number>([[start, 1]]);
+  const depth = new Map<string, number>([[start, 0]]);
+  const via = new Map<string, string>();
+  const queue = [start];
+  while (queue.length) {
+    const cur = queue.shift()!;
+    const edges = dir === 'down' ? g.out.get(cur) ?? [] : g.inc.get(cur) ?? [];
+    for (const e of edges) {
+      const next = dir === 'down' ? e.code : e.from;
+      const x = w.get(cur)! * e.encompassing;
+      if (x < CUTOFF || x <= (w.get(next) ?? 0)) continue;
+      w.set(next, x); depth.set(next, depth.get(cur)! + 1); via.set(next, cur);
+      queue.push(next);
+    }
+  }
+  w.delete(start);
+  return { w, depth, via };
+}
+
+export function GraphPage() {
+  const ml = useApi<Program>('/program/ml'), math = useApi<Program>('/program/math');
+  const edges = useApi<Row[]>('/edges');
+  const g = useMemo(() => ml.data && math.data && edges.data ? build(ml.data, math.data, edges.data) : undefined, [ml.data, math.data, edges.data]);
+  const [code, setCode] = useState(() => new URLSearchParams(location.search).get('idea') ?? DEFAULT);
+  const select = (c: string) => { setCode(c); history.replaceState(null, '', `?idea=${encodeURIComponent(c)}`); };
+  const [memory, setMemory] = useState(0.3);
+
+  const stats = useMemo(() => {
+    if (!edges.data) return undefined;
+    const by = (k: string) => edges.data!.filter(e => e.kind === k);
+    const hist = (rows: Row[]) => Array.from({ length: 10 }, (_, i) => rows.filter(e => Math.min(9, Math.floor(e.encompassing * 10 - 1e-9)) === i).length);
+    return { pre: by('prerequisite').length, imp: by('implicit').length, hPre: hist(by('prerequisite')), hImp: hist(by('implicit')), codex: edges.data.filter(e => e.source.startsWith('codex')).length };
+  }, [edges.data]);
+
+  return <div className="wrap page">
+    <div className="page-head"><div>
+      <h1>Граф зависимостей</h1>
+      <p className="muted" style={{ margin: '6px 0 0', maxWidth: '78ch' }}>Каждое ребро «сложная → простая» несёт вес <code>encompassing</code>: какую долю повторения простой темы засчитывает успешное решение сложной. Сплошные рёбра — пререквизиты внутри программы, пунктир — неявные связи ML-идей с математикой, которые расставил Codex Sol 6.1.</p>
+    </div></div>
+    {!g ? <p className="skel">загрузка графа</p> : <>
+      <Picker g={g} code={code} onPick={select} />
+      {g.nodes.has(code) ? <>
+        <section className="panel" style={{ marginBottom: 16 }}>
+          <div className="phead"><h2>{g.nodes.get(code)!.name}</h2><span><Link to={`/idea/${code}`}>карточка идеи →</Link></span></div>
+          <Ego g={g} code={code} onPick={select} />
+          <div className="legend"><span><i style={{ background: 'var(--accent)' }} />пререквизит ML</span><span><i style={{ background: 'var(--ds)' }} />пререквизит математики</span><span><i style={{ background: 'var(--ml)' }} />неявно (ML → мат), пунктир</span><span>толщина и число — вес ребра; у дальних вершин — произведение весов по пути</span></div>
+        </section>
+        <div className="stats-grid" style={{ marginBottom: 16 }}>
+          <Credit g={g} code={code} memory={memory} setMemory={setMemory} onPick={select} />
+          <Covers g={g} code={code} onPick={select} />
+        </div>
+      </> : <p className="alert">Нет идеи с кодом <code>{code}</code>.</p>}
+      <Heatmap g={g} />
+      {stats && <section className="panel" style={{ marginTop: 16 }}>
+        <div className="phead"><h2>Распределение весов</h2><span>{fmt(stats.pre, 0)} пререквизитов · {fmt(stats.imp, 0)} неявных · {fmt(stats.codex, 0)} от Codex</span></div>
+        <WeightHist a={stats.hPre} b={stats.hImp} />
+      </section>}
+    </>}
+  </div>;
+}
+
+function Picker({ g, code, onPick }: { g: Graph; code: string; onPick: (c: string) => void }) {
+  const [q, setQ] = useState('');
+  const hits = useMemo(() => {
+    const n = q.trim().toLowerCase();
+    if (n.length < 2) return [];
+    return [...g.nodes.values()].filter(x => x.name.toLowerCase().includes(n) || x.code.includes(n)).slice(0, 12);
+  }, [q, g]);
+  const rich = useMemo(() => [...g.nodes.values()].filter(n => n.program === 'ml').map(n => ({ n, k: (g.out.get(n.code)?.length ?? 0) + (g.inc.get(n.code)?.length ?? 0) })).sort((a, b) => b.k - a.k).slice(0, 8), [g]);
+  return <div style={{ display: 'grid', gap: 8, marginBottom: 16, position: 'relative' }}>
+    <input type="search" placeholder="найти идею или тему: бустинг, производная, attention…" value={q} onChange={e => setQ(e.target.value)} aria-label="Поиск идеи" />
+    {hits.length > 0 && <div className="panel" style={{ position: 'absolute', top: 38, left: 0, right: 0, zIndex: 5, padding: 6, animation: 'none' }}>
+      {hits.map(h => <button key={h.code} className="btn ghost" style={{ width: '100%', justifyContent: 'space-between', height: 30 }} onClick={() => { onPick(h.code); setQ(''); }}>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{h.name}</span><small>{h.program === 'ml' ? 'ML' : 'мат'} · {h.sectionName}</small>
+      </button>)}
+    </div>}
+    <div className="chips">{rich.map(({ n }) => <button key={n.code} className="chip" data-s={n.code === code ? 'learned' : undefined} onClick={() => onPick(n.code)} style={{ cursor: 'pointer' }}><span>{n.name}</span></button>)}</div>
+  </div>;
+}
+
+const COL_W = 210, BOX_W = 178, BOX_H = 34, GAP = 10, PER_COL = 12;
+const edgeColor = (e: Row, g: Graph) => e.kind === 'implicit' ? 'var(--ml)' : g.nodes.get(e.from)!.program === 'math' ? 'var(--ds)' : 'var(--accent)';
+
+// Columns by depth: prerequisites to the left (up to 2 steps), dependents to
+// the right (up to 2). Each column keeps its strongest nodes.
+function Ego({ g, code, onPick }: { g: Graph; code: string; onPick: (c: string) => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [hover, setHover] = useState<string | null>(null);
+  const layout = useMemo(() => {
+    const down = propagate(g, code, 'down'), up = propagate(g, code, 'up');
+    const cols = new Map<number, { code: string; w: number }[]>([[0, [{ code, w: 1 }]]]);
+    for (const [c, d] of down.depth) if (c !== code && d <= 2) (cols.get(-d) ?? cols.set(-d, []).get(-d)!).push({ code: c, w: down.w.get(c)! });
+    for (const [c, d] of up.depth) if (c !== code && d <= 2 && !down.w.has(c)) (cols.get(d) ?? cols.set(d, []).get(d)!).push({ code: c, w: up.w.get(c)! });
+    const keys = [...cols.keys()].sort((a, b) => a - b);
+    const hidden = new Map<number, number>();
+    for (const k of keys) { const list = cols.get(k)!.sort((a, b) => b.w - a.w); hidden.set(k, Math.max(0, list.length - PER_COL)); cols.set(k, list.slice(0, PER_COL)); }
+    const maxRows = Math.max(...keys.map(k => cols.get(k)!.length));
+    const H = Math.max(140, maxRows * (BOX_H + GAP) + 40);
+    const pos = new Map<string, { x: number; y: number; w: number; depth: number }>();
+    keys.forEach((k, i) => {
+      const list = cols.get(k)!;
+      const top = (H - 30 - list.length * (BOX_H + GAP) + GAP) / 2 + 24;
+      list.forEach((n, j) => pos.set(n.code, { x: i * COL_W + 12, y: top + j * (BOX_H + GAP), w: n.w, depth: k }));
+    });
+    // Direct edges between drawn nodes only.
+    const lines: { e: Row; a: { x: number; y: number }; b: { x: number; y: number } }[] = [];
+    for (const [c, p] of pos) for (const e of g.out.get(c) ?? []) { const q = pos.get(e.code); if (q && q.x < p.x) lines.push({ e, a: p, b: q }); }
+    return { pos, lines, keys, hidden, W: keys.length * COL_W + 12, H, center: keys.indexOf(0) };
+  }, [g, code]);
+  useEffect(() => { const el = ref.current; if (el) el.scrollLeft = Math.max(0, layout.center * COL_W - el.clientWidth / 2 + COL_W / 2); }, [layout]);
+  const label = (k: number) => k === 0 ? 'выбрано' : k < 0 ? `опирается, шаг ${-k}` : `закрывает её, шаг ${k}`;
+  const lit = (e: Row) => !hover || e.from === hover || e.code === hover;
+  return <div ref={ref} style={{ overflowX: 'auto', margin: '0 -16px', padding: '0 16px' }}>
+    <svg width={layout.W} height={layout.H} style={{ display: 'block', minWidth: layout.W }} role="img" aria-label="Граф зависимостей вокруг выбранной идеи">
+      {layout.keys.map((k, i) => <text key={k} x={i * COL_W + 12} y={14} className="axis" style={{ fill: 'var(--faint)', font: '10px var(--mono)' }}>{label(k)}{layout.hidden.get(k) ? ` · ещё ${layout.hidden.get(k)}` : ''}</text>)}
+      {layout.lines.map(({ e, a, b }, i) => {
+        const x1 = b.x + BOX_W, y1 = b.y + BOX_H / 2, x2 = a.x, y2 = a.y + BOX_H / 2, mx = (x1 + x2) / 2;
+        return <g key={i} opacity={lit(e) ? 1 : 0.12} style={{ transition: 'opacity .15s' }}>
+          <path d={`M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`} fill="none" stroke={edgeColor(e, g)} strokeWidth={0.6 + e.encompassing * 3.4} strokeOpacity={0.35 + e.encompassing * 0.55} strokeDasharray={e.kind === 'implicit' ? '5 4' : undefined} />
+          {(hover ? lit(e) : e.from === code || e.code === code) && <text x={mx} y={(y1 + y2) / 2 - 3} textAnchor="middle" style={{ font: '10px var(--mono)', fill: 'var(--muted)', paintOrder: 'stroke', stroke: 'var(--panel)', strokeWidth: 3 }}>{e.encompassing.toFixed(2)}</text>}
+        </g>;
+      })}
+      {[...layout.pos].map(([c, p]) => { const n = g.nodes.get(c)!; const sel = c === code; return <g key={c} style={{ cursor: sel ? 'default' : 'pointer' }} onClick={() => !sel && onPick(c)} onPointerEnter={() => setHover(c)} onPointerLeave={() => setHover(null)}>
+        <rect x={p.x} y={p.y} width={BOX_W} height={BOX_H} rx={5} fill={sel ? 'var(--fg)' : 'var(--bg)'} stroke={sel ? 'var(--fg)' : n.program === 'math' ? 'var(--ds)' : 'var(--line-strong)'} />
+        <text x={p.x + 8} y={p.y + 14} style={{ font: '11px var(--mono)', fill: sel ? 'var(--bg)' : 'var(--fg)' }}>{n.name.length > 24 ? n.name.slice(0, 23) + '…' : n.name}</text>
+        <text x={p.x + 8} y={p.y + 27} style={{ font: '9.5px var(--mono)', fill: sel ? 'var(--bg)' : 'var(--muted)', opacity: 0.85 }}>{n.program === 'ml' ? 'ML' : 'мат'}{!sel && ` · путь ${p.w.toFixed(2)}`}</text>
+        <title>{n.name} — {n.sectionName}</title>
+      </g>; })}
+    </svg>
+  </div>;
+}
+
+// What one successful solve credits, at a given memory of the simpler topics:
+// credit = path weight × (1 − memory), the server's formula.
+function Credit({ g, code, memory, setMemory, onPick }: { g: Graph; code: string; memory: number; setMemory: (m: number) => void; onPick: (c: string) => void }) {
+  const rows = useMemo(() => [...propagate(g, code, 'down').w].sort((a, b) => b[1] - a[1]), [g, code]);
+  const ml = rows.filter(([c]) => g.nodes.get(c)!.program === 'ml').length;
+  const total = rows.reduce((s, [, w]) => s + w * (1 - memory), 0);
+  return <section className="panel">
+    <div className="phead"><h2>Неявное повторение</h2><span>{rows.length} тем · ML {ml}, мат {rows.length - ml}</span></div>
+    <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>Если решить эту задачу, каждая тема ниже получит долю повторения <b style={{ color: 'var(--fg)' }}>вес пути × (1 − память)</b>. Сумма — <b style={{ color: 'var(--fg)' }}>{fmt(total, 1)}</b> «повторений даром».</p>
+    <label className="pace" style={{ marginTop: 0, marginBottom: 10 }}><span>Память простых тем — <b>{Math.round(memory * 100)}%</b></span>
+      <input type="range" min={0} max={0.9} step={0.1} value={memory} style={{ '--fill': `${memory / 0.9 * 100}%` } as CSSProperties} onChange={e => setMemory(Number(e.target.value))} aria-label="Память простых тем" /></label>
+    {rows.length ? <ul className="edges" style={{ maxHeight: 320, overflow: 'auto' }}>{rows.slice(0, 60).map(([c, w]) => <li key={c} style={{ gridTemplateColumns: 'minmax(0,1fr) 70px 40px' }}>
+      <a href={`?idea=${encodeURIComponent(c)}`} onClick={e => { e.preventDefault(); onPick(c); }}>{g.nodes.get(c)!.program === 'math' && <span className="tag">мат</span>} {g.nodes.get(c)!.name}</a>
+      <span className={`w${g.nodes.get(c)!.program === 'math' ? ' math' : ''}`}><i style={{ width: `${w * (1 - memory) * 100}%` }} /></span>
+      <span className="num">+{(w * (1 - memory)).toFixed(2)}</span>
+    </li>)}</ul> : <p className="empty">Эта тема ни на что не опирается — она лист графа.</p>}
+  </section>;
+}
+
+function Covers({ g, code, onPick }: { g: Graph; code: string; onPick: (c: string) => void }) {
+  const rows = useMemo(() => [...propagate(g, code, 'up').w].sort((a, b) => b[1] - a[1]), [g, code]);
+  const full = rows.filter(([, w]) => w >= 0.5).length;
+  return <section className="panel">
+    <div className="phead"><h2>Кто её закрывает</h2><span>{rows.length} задач</span></div>
+    <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>Решая любую из этих задач, ученик неявно повторяет выбранную тему. С весом ≥ 0,5 — <b style={{ color: 'var(--fg)' }}>{full}</b>: такой урок в ленте заменяет просроченное повторение этой темы.</p>
+    {rows.length ? <ul className="edges" style={{ maxHeight: 360, overflow: 'auto' }}>{rows.slice(0, 60).map(([c, w]) => <li key={c} style={{ gridTemplateColumns: 'minmax(0,1fr) 70px 40px' }}>
+      <a href={`?idea=${encodeURIComponent(c)}`} onClick={e => { e.preventDefault(); onPick(c); }}>{g.nodes.get(c)!.program === 'math' && <span className="tag">мат</span>} {g.nodes.get(c)!.name}</a>
+      <span className="w"><i style={{ width: `${w * 100}%` }} /></span><span className="num">{w.toFixed(2)}</span>
+    </li>)}</ul> : <p className="empty">Ни одна задача на неё не опирается — это вершина графа.</p>}
+  </section>;
+}
+
+// Section × section: summed encompassing weight of every edge between them.
+function Heatmap({ g }: { g: Graph }) {
+  const [cell, setCell] = useState<{ a: string; b: string } | null>(null);
+  const { m, max, rowsIdx, colsIdx } = useMemo(() => {
+    const m = new Map<string, { sum: number; n: number; top: Row[] }>();
+    for (const list of g.out.values()) for (const e of list) {
+      const k = `${g.nodes.get(e.from)!.section}|${g.nodes.get(e.code)!.section}`;
+      const v = m.get(k) ?? { sum: 0, n: 0, top: [] };
+      v.sum += e.encompassing; v.n++; v.top.push(e); m.set(k, v);
+    }
+    let max = 0; for (const v of m.values()) max = Math.max(max, v.sum);
+    const used = (id: string, side: 0 | 1) => [...m.keys()].some(k => k.split('|')[side] === id);
+    return { m, max, rowsIdx: g.sections.filter(s => used(s.id, 0)), colsIdx: g.sections.filter(s => used(s.id, 1)) };
+  }, [g]);
+  const sel = cell ? m.get(`${cell.a}|${cell.b}`) : undefined;
+  const short = (s: string) => s.length > 22 ? s.slice(0, 21) + '…' : s;
+  return <section className="panel">
+    <div className="phead"><h2>Разделы → разделы</h2><span>сумма весов рёбер; строка опирается на столбец</span></div>
+    <div style={{ overflowX: 'auto', margin: '0 -16px', padding: '0 16px' }}>
+      <table style={{ borderCollapse: 'separate', borderSpacing: 2, fontSize: 10 }}>
+        <thead><tr><th />{colsIdx.map(c => <th key={c.id} title={c.name} style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', fontWeight: 400, color: c.program === 'math' ? 'var(--ds)' : 'var(--muted)', height: 150, textAlign: 'left', whiteSpace: 'nowrap' }}>{short(c.name)}</th>)}</tr></thead>
+        <tbody>{rowsIdx.map(r => <tr key={r.id}><th title={r.name} style={{ textAlign: 'right', fontWeight: 400, whiteSpace: 'nowrap', paddingRight: 6, color: r.program === 'math' ? 'var(--ds)' : 'var(--fg)' }}>{short(r.name)}</th>
+          {colsIdx.map(c => { const v = m.get(`${r.id}|${c.id}`); const t = v ? Math.sqrt(v.sum / max) : 0; const on = cell?.a === r.id && cell?.b === c.id; return <td key={c.id} onClick={() => v && setCell({ a: r.id, b: c.id })} title={v ? `${r.name} → ${c.name}: ${v.n} рёбер, Σ ${fmt(v.sum)}` : ''}
+            style={{ width: 22, minWidth: 22, height: 22, borderRadius: 3, cursor: v ? 'pointer' : 'default', background: v ? `color-mix(in srgb, ${c.program === 'math' && r.program === 'ml' ? 'var(--ml)' : 'var(--accent)'} ${Math.round(12 + t * 88)}%, var(--bg))` : 'var(--sunk)', outline: on ? '2px solid var(--fg)' : undefined }} />; })}
+        </tr>)}</tbody>
+      </table>
+    </div>
+    {sel && cell && <div style={{ marginTop: 12 }}>
+      <p style={{ margin: '0 0 6px' }}><b>{g.sections.find(s => s.id === cell.a)!.name}</b> → <b>{g.sections.find(s => s.id === cell.b)!.name}</b>: {sel.n} рёбер, средний вес {fmt(sel.sum / sel.n, 2)}</p>
+      <ul className="edges">{sel.top.sort((a, b) => b.encompassing - a.encompassing).slice(0, 12).map((e, i) => <li key={i} style={{ gridTemplateColumns: 'minmax(0,1fr) 44px' }}>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}><a href={`/ml/graph?idea=${encodeURIComponent(e.from)}`} onClick={ev => { ev.preventDefault(); go(`/graph?idea=${encodeURIComponent(e.from)}`); }}>{g.nodes.get(e.from)!.name}</a> → {g.nodes.get(e.code)!.name}</span>
+        <span className="num">{e.encompassing.toFixed(2)}</span>
+      </li>)}</ul>
+    </div>}
+  </section>;
+}
+
+function WeightHist({ a, b }: { a: number[]; b: number[] }) {
+  const max = Math.sqrt(Math.max(1, ...a, ...b));
+  const h = (v: number) => `${Math.sqrt(v) / max * 100}%`;
+  return <div>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(10, 1fr)', gap: 6, alignItems: 'end', height: 110 }}>
+      {a.map((v, i) => <div key={i} style={{ display: 'flex', gap: 2, alignItems: 'end', height: '100%' }} title={`${(i / 10).toFixed(1)}–${((i + 1) / 10).toFixed(1)}: пререквизитов ${v}, неявных ${b[i]}`}>
+        <i style={{ flex: 1, height: h(v), background: 'var(--accent)', borderRadius: '2px 2px 0 0', minHeight: v ? 2 : 0 }} />
+        <i style={{ flex: 1, height: h(b[i]), background: 'var(--ml)', borderRadius: '2px 2px 0 0', minHeight: b[i] ? 2 : 0 }} />
+      </div>)}
+    </div>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(10, 1fr)', gap: 6, fontSize: 10, color: 'var(--faint)', marginTop: 4 }}>{a.map((v, i) => <span key={i}>{(i / 10).toFixed(1)}–{((i + 1) / 10).toFixed(1)}<br /><b style={{ color: 'var(--accent)', fontWeight: 500 }}>{v}</b> · <b style={{ color: 'var(--ml)', fontWeight: 500 }}>{b[i]}</b></span>)}</div>
+    <div className="legend"><span><i style={{ background: 'var(--accent)' }} />пререквизиты</span><span><i style={{ background: 'var(--ml)' }} />неявные ML → мат</span><span>ось x — вес encompassing, высота — корень из числа рёбер; наведите на столбик</span></div>
+  </div>;
+}
