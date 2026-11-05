@@ -201,11 +201,11 @@ func (c *Content) buildTracks() {
 			all = append(all, i)
 		}
 	}
-	c.Track = map[string][]*Idea{"all": append(all, c.Program["ml"]...), "math": c.Program["math"]}
+	c.Track = map[string][]*Idea{"all": append(all, c.Program["ml"]...), "ml": c.Program["ml"], "math": c.Program["math"]}
 }
 
-// Tracks: "all" is ML with the math it needs, "math" the whole math program.
-var tracks = map[string]bool{"all": true, "math": true}
+// Tracks: "all" is ML with the math it needs, "ml" ML alone, "math" the math program.
+var tracks = map[string]bool{"all": true, "ml": true, "math": true}
 
 // weight orders lessons and weighs progress; it is the idea's own weight.
 func (c *Content) weight(i *Idea, _ string) float64 { return i.Weight }

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 
 export const BASE = '/ml/api/v1';
 
-export type Track = 'all' | 'math';
+export type Track = 'all' | 'ml' | 'math';
 export type Kind = 'lesson' | 'review' | 'quiz';
 
 export interface MemoryView { code: string; status: 'new' | 'partial' | 'learned'; rep: number; memory_now: number; due_at: string | null }

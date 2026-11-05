@@ -59,7 +59,7 @@ sqlite3 ml-lab.db "SELECT program, count(*) FROM ideas GROUP BY program"`}</pre>
         <Ep path="/stats"><p id="stats">Обезличенная статистика — см. ниже.</p></Ep>
 
         <h2 id="learning">API ученика</h2>
-        <p>Сессия — cookie <code>mllab</code> (HttpOnly). Все POST требуют заголовок <code>X-Requested-With: mllab</code>. Трек — <code>all</code> (ML + математика) или <code>math</code> (только математика).</p>
+        <p>Сессия — cookie <code>mllab</code> (HttpOnly). Все POST требуют заголовок <code>X-Requested-With: mllab</code>. Трек — <code>all</code> (ML + математика), <code>ml</code> (только ML) или <code>math</code> (только математика).</p>
         <Ep m="POST" path="/auth/register · /auth/login · /auth/logout"><pre>{`{"name": "ник", "password": "от 6 символов"}`}</pre></Ep>
         <Ep path="/me?track="><p>Прогресс: выучено, пора повторить, доля программы (по весам), XP по дням, состояние каждой идеи, прогноз оставшегося XP.</p></Ep>
         <Ep path="/next?track="><p>Лента FIRe — до 8 заданий <code>{'{kind, code, title, xp, covers}'}</code>.</p></Ep>
