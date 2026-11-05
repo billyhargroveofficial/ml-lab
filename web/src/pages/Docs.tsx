@@ -13,7 +13,7 @@ function Sec({ id, title, children }: { id: string; title: string; children: Rea
 export function Docs() {
   return <div className="wrap page">
     <div className="page-head"><div><h1>Как это работает</h1><p className="muted" style={{ margin: '6px 0 0' }}>FIRe Lab — локальное приложение: интервальное повторение по графу знаний, а темы для него пишет ваш агент.</p></div></div>
-    <div className="docs">
+    <div className="docs docs-grid">
       <Toc items={[['packs', 'Пакеты'], ['agent', 'Новая тема через агента'], ['fire', 'Алгоритм'], ['placement', 'Вступительный тест'], ['local', 'Данные и прогресс']]} />
       <div className="prose">
         <Sec id="packs" title="Пакеты">

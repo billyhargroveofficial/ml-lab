@@ -371,3 +371,10 @@ select { font: inherit; font-size: 12px; height: 30px; padding: 0 8px; border: 1
 .qitem:first-child { border-top: 0; }
 .qhead { width: 100%; display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 8px; align-items: baseline; padding: 10px 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .qhead:hover { color: var(--accent); }
+
+.gcanvas { position: relative; height: min(72vh, 760px); margin: 0 -16px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: radial-gradient(circle at 1px 1px, var(--line) 1px, transparent 0) 0 0 / 22px 22px; overflow: hidden; }
+.gcanvas-host { position: absolute; inset: 0; cursor: grab; }
+.gcanvas-host:active { cursor: grabbing; }
+.gtip { position: absolute; z-index: 3; pointer-events: none; max-width: 320px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); box-shadow: var(--shadow); font-size: 12px; }
+.gtip b { display: block; }
+.gtip small { color: var(--muted); }

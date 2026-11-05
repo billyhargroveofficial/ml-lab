@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useMemo, useState, type CSSProperties } from 'react';
 import { useApi, type Edge, type PackInfo } from '../api';
 import { go, Link, packTitle, useSession } from '../App';
 import { fmt } from '../ui/charts';
 import { AnimatePresence, motion, Num, Panel, soft } from '../ui/motion';
 import { PackSelect } from '../ui/PackSelect';
 import { PinButton } from '../ui/Pin';
+import { GraphCanvas } from '../ui/GraphCanvas';
 
 type Row = Edge & { from: string };
 interface Node { code: string; name: string; program: string; section: string; sectionName: string; alt: boolean }
@@ -75,7 +76,11 @@ export function GraphPage() {
   const [picked, setCode] = useState(() => params.get('idea') ?? '');
   const code = g && g.nodes.has(picked) ? picked : busiest ?? picked;
   const url = (c: string, v: string) => history.replaceState(null, '', `?view=${v}&idea=${encodeURIComponent(c)}`);
+  const [focus, setFocus] = useState(0);
   const select = (c: string) => { setCode(c); url(c, view); };
+  const jump = (c: string) => { select(c); setFocus(f => f + 1); };
+  const down = useMemo(() => g ? propagate(g, code, 'down') : { w: new Map(), via: new Map(), depth: new Map() }, [g, code]);
+  const up = useMemo(() => g ? propagate(g, code, 'up') : { w: new Map(), via: new Map(), depth: new Map() }, [g, code]);
   const changeView = (v: string) => { setView(v); url(code, v); };
   const [memory, setMemory] = useState(0.3);
 
@@ -93,12 +98,12 @@ export function GraphPage() {
       <p className="muted" style={{ margin: '6px 0 0', maxWidth: '78ch' }}>Каждое ребро «сложная → простая» несёт вес <code>encompassing</code>: какую долю повторения простой темы засчитывает успешное решение сложной. Сплошные рёбра — <code>requires</code> (блокируют урок), пунктир — <code>uses</code> (только раздают повторение). Веса ставит автор пакета — обычно агент — по рубрике из <code>docs/pack-format.md</code>.</p>
     </div>{packs.length > 0 && <PackSelect all packs={packs} value={view} onChange={changeView} />}</div>
     {!packs.length && list.data ? <p className="muted">Пакетов пока нет — граф появится, когда вы добавите первый.</p> : !g ? <p className="skel">загрузка графа</p> : <>
-      <Picker g={g} code={code} onPick={select} />
+      <Picker g={g} code={code} onPick={jump} />
       {g.nodes.has(code) ? <>
         <Panel order={1} style={{ marginBottom: 16 }}>
           <div className="phead"><h2>{g.nodes.get(code)!.name}</h2><span style={{ display: 'inline-flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}><PinButton code={code} /><Link to={`/idea/${code}`}>карточка идеи →</Link></span></div>
-          <Ego g={g} code={code} onPick={select} />
-          <div className="legend"><span><i style={{ background: 'var(--accent)' }} />requires</span><span><i style={{ background: 'var(--ds)' }} />requires в другом пакете</span><span><i style={{ background: 'var(--ml)' }} />uses, пунктир</span><span>толщина и число — вес ребра; у дальних вершин — произведение весов по пути</span></div>
+          <GraphCanvas g={g} code={code} down={down} up={up} focus={focus} onPick={select} />
+          <div className="legend"><span><i style={{ background: 'var(--accent)' }} />на что опирается (получает зачёт)</span><span><i style={{ background: 'var(--ds)' }} />что на ней построено</span><span><i style={{ background: 'var(--ml)' }} />uses</span><span>число на ребре — его вес, «путь» — произведение весов до выбранной; колесо — масштаб, перетаскивание — сдвиг, клик — выбрать</span></div>
         </Panel>
         <div className="stats-grid" style={{ marginBottom: 16 }}>
           <Credit g={g} code={code} memory={memory} setMemory={setMemory} onPick={select} />
@@ -133,60 +138,9 @@ function Picker({ g, code, onPick }: { g: Graph; code: string; onPick: (c: strin
   </div>;
 }
 
-const COL_W = 210, BOX_W = 178, BOX_H = 34, GAP = 10, PER_COL = 12;
-const edgeColor = (e: Row, g: Graph) => e.kind === 'implicit' ? 'var(--ml)' : g.nodes.get(e.from)!.alt ? 'var(--ds)' : 'var(--accent)';
 
 // Columns by depth: prerequisites to the left (up to 2 steps), dependents to
 // the right (up to 2). Each column keeps its strongest nodes.
-function Ego({ g, code, onPick }: { g: Graph; code: string; onPick: (c: string) => void }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [hover, setHover] = useState<string | null>(null);
-  const layout = useMemo(() => {
-    const down = propagate(g, code, 'down'), up = propagate(g, code, 'up');
-    const cols = new Map<number, { code: string; w: number }[]>([[0, [{ code, w: 1 }]]]);
-    for (const [c, d] of down.depth) if (c !== code && d <= 2) (cols.get(-d) ?? cols.set(-d, []).get(-d)!).push({ code: c, w: down.w.get(c)! });
-    for (const [c, d] of up.depth) if (c !== code && d <= 2 && !down.w.has(c)) (cols.get(d) ?? cols.set(d, []).get(d)!).push({ code: c, w: up.w.get(c)! });
-    const keys = [...cols.keys()].sort((a, b) => a - b);
-    const hidden = new Map<number, number>();
-    for (const k of keys) { const list = cols.get(k)!.sort((a, b) => b.w - a.w); hidden.set(k, Math.max(0, list.length - PER_COL)); cols.set(k, list.slice(0, PER_COL)); }
-    const maxRows = Math.max(...keys.map(k => cols.get(k)!.length));
-    const H = Math.max(140, maxRows * (BOX_H + GAP) + 40);
-    const pos = new Map<string, { x: number; y: number; w: number; depth: number }>();
-    keys.forEach((k, i) => {
-      const list = cols.get(k)!;
-      const top = (H - 30 - list.length * (BOX_H + GAP) + GAP) / 2 + 24;
-      list.forEach((n, j) => pos.set(n.code, { x: i * COL_W + 12, y: top + j * (BOX_H + GAP), w: n.w, depth: k }));
-    });
-    // Direct edges between drawn nodes only.
-    const lines: { e: Row; a: { x: number; y: number }; b: { x: number; y: number } }[] = [];
-    for (const [c, p] of pos) for (const e of g.out.get(c) ?? []) { const q = pos.get(e.code); if (q && q.x < p.x) lines.push({ e, a: p, b: q }); }
-    return { pos, lines, keys, hidden, W: keys.length * COL_W + 12, H, center: keys.indexOf(0) };
-  }, [g, code]);
-  useEffect(() => { const el = ref.current; if (el) el.scrollLeft = Math.max(0, layout.center * COL_W - el.clientWidth / 2 + COL_W / 2); }, [layout]);
-  const label = (k: number) => k === 0 ? 'выбрано' : k < 0 ? `опирается, шаг ${-k}` : `закрывает её, шаг ${k}`;
-  const lit = (e: Row) => !hover || e.from === hover || e.code === hover;
-  return <div ref={ref} style={{ overflowX: 'auto', margin: '0 -16px', padding: '0 16px' }}>
-    <AnimatePresence mode="wait"><motion.svg key={code} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.12 } }} width={layout.W} height={layout.H} style={{ display: 'block', minWidth: layout.W }} role="img" aria-label="Граф зависимостей вокруг выбранной идеи">
-      {layout.keys.map((k, i) => <text key={k} x={i * COL_W + 12} y={14} className="axis" style={{ fill: 'var(--faint)', font: '10px var(--font)' }}>{label(k)}{layout.hidden.get(k) ? ` · ещё ${layout.hidden.get(k)}` : ''}</text>)}
-      {layout.lines.map(({ e, a, b }, i) => {
-        const x1 = b.x + BOX_W, y1 = b.y + BOX_H / 2, x2 = a.x, y2 = a.y + BOX_H / 2, mx = (x1 + x2) / 2;
-        return <motion.g key={`${e.from}>${e.code}`} initial={{ opacity: 0 }} animate={{ opacity: lit(e) ? 1 : 0.12 }} transition={{ duration: 0.25, delay: hover ? 0 : 0.15 + Math.min(i, 40) * 0.008 }}>
-          <motion.path initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 0.6, ease: [0.2, 0.8, 0.2, 1], delay: 0.1 + Math.min(i, 40) * 0.008 }} d={`M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`} fill="none" stroke={edgeColor(e, g)} strokeWidth={0.6 + e.encompassing * 3.4} strokeOpacity={0.35 + e.encompassing * 0.55} strokeDasharray={e.kind === 'implicit' ? '5 4' : undefined} />
-          {(hover ? lit(e) : e.from === code || e.code === code) && <text x={mx} y={(y1 + y2) / 2 - 3} textAnchor="middle" style={{ font: '10px var(--font)', fill: 'var(--muted)', paintOrder: 'stroke', stroke: 'var(--panel)', strokeWidth: 3 }}>{e.encompassing.toFixed(2)}</text>}
-        </motion.g>;
-      })}
-      {[...layout.pos].map(([c, p]) => { const n = g.nodes.get(c)!; const sel = c === code; return <motion.g key={c} initial={{ opacity: 0, x: p.depth < 0 ? 16 : p.depth > 0 ? -16 : 0, scale: sel ? 0.9 : 1 }} animate={{ opacity: 1, x: 0, scale: 1 }} transition={{ ...soft, delay: Math.abs(p.depth) * 0.06 }} style={{ cursor: sel ? 'default' : 'pointer', originX: `${p.x + BOX_W / 2}px`, originY: `${p.y + BOX_H / 2}px` }} whileHover={sel ? undefined : { scale: 1.03 }} onClick={() => !sel && onPick(c)} onPointerEnter={() => setHover(c)} onPointerLeave={() => setHover(null)}>
-        <rect x={p.x} y={p.y} width={BOX_W} height={BOX_H} rx={5} fill={sel ? 'var(--fg)' : 'var(--bg)'} stroke={sel ? 'var(--fg)' : n.alt ? 'var(--ds)' : 'var(--line-strong)'} />
-        <text x={p.x + 8} y={p.y + 14} style={{ font: '11px var(--font)', fill: sel ? 'var(--bg)' : 'var(--fg)' }}>{n.name.length > 24 ? n.name.slice(0, 23) + '…' : n.name}</text>
-        <text x={p.x + 8} y={p.y + 27} style={{ font: '9.5px var(--font)', fill: sel ? 'var(--bg)' : 'var(--muted)', opacity: 0.85 }}>{n.program}{!sel && ` · путь ${p.w.toFixed(2)}`}</text>
-        <title>{n.name} — {n.sectionName}</title>
-      </motion.g>; })}
-    </motion.svg></AnimatePresence>
-  </div>;
-}
-
-// What one successful solve credits, at a given memory of the simpler topics:
-// credit = path weight × (1 − memory), the server's formula.
 function Credit({ g, code, memory, setMemory, onPick }: { g: Graph; code: string; memory: number; setMemory: (m: number) => void; onPick: (c: string) => void }) {
   const rows = useMemo(() => [...propagate(g, code, 'down').w].sort((a, b) => b[1] - a[1]), [g, code]);
   const total = rows.reduce((s, [, w]) => s + w * (1 - memory), 0);
