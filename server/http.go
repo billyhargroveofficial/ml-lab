@@ -309,6 +309,19 @@ func (a *API) Routes(mux *http.ServeMux) {
 		}
 		writeJSON(w, 200, out)
 	}))
+	mux.HandleFunc("POST "+p+"/placement", a.authed(func(w http.ResponseWriter, r *http.Request, id int64, _ string) {
+		out, err := a.lab.StartPlacement(r.Context(), id, track(r))
+		a.respond(w, out, err)
+	}))
+	mux.HandleFunc("POST "+p+"/placement/answer", a.authed(func(w http.ResponseWriter, r *http.Request, id int64, _ string) {
+		var body struct{ Choice int }
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
+			fail(w, 400, "bad json")
+			return
+		}
+		out, err := a.lab.AnswerPlacement(r.Context(), id, body.Choice)
+		a.respond(w, out, err)
+	}))
 	mux.HandleFunc("POST "+p+"/attempts", a.authed(func(w http.ResponseWriter, r *http.Request, id int64, _ string) {
 		var body struct{ Kind, Code string }
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {

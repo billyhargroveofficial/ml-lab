@@ -30,7 +30,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("db: %v", err)
 	}
-	api := &API{lab: &Lab{c, st}, prefix: *prefix, secure: *secure, limit: &limiter{hits: map[string][]time.Time{}}}
+	if n, err := st.Forget(c.Ideas); err != nil {
+		log.Fatal(err)
+	} else if n > 0 {
+		log.Printf("forgot progress on %d ideas no longer in the program", n)
+	}
+	api := &API{lab: &Lab{c: c, st: st}, prefix: *prefix, secure: *secure, limit: &limiter{hits: map[string][]time.Time{}}}
 	mux := http.NewServeMux()
 	api.Routes(mux)
 

@@ -21,7 +21,7 @@ export function ProgramPage() {
     <div className="page-head">
       <div><h1>Программа</h1><div className="stack" style={{ marginTop: 6 }}>
         <p className="muted" style={{ margin: 0 }} data-on={program === 'ml' || undefined}>{ml.data ? Object.keys(ml.data.ideas).length : 427} ML-идей по разделам и темам.</p>
-        <p className="muted" style={{ margin: 0 }} data-on={program === 'math' || undefined}>{mathP.data ? Object.keys(mathP.data.ideas).length : 1293} тем математики для ML.</p>
+        <p className="muted" style={{ margin: 0 }} data-on={program === 'math' || undefined}>{mathP.data ? Object.keys(mathP.data.ideas).length : 634} тем математики, на которых стоит ML.</p>
       </div></div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <Seg big label="Программа" value={program} items={[['ml', 'ML теория'], ['math', 'ML математика']]} onChange={p => { setProgram(p); history.replaceState(null, '', `?program=${p}`); }} />

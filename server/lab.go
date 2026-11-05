@@ -9,6 +9,7 @@ import (
 	"errors"
 	"math"
 	"sort"
+	"sync"
 	"time"
 	_ "time/tzdata"
 )
@@ -33,6 +34,10 @@ func shuffle[T any](xs []T) {
 type Lab struct {
 	c  *Content
 	st *Store
+
+	placeMu sync.Mutex
+	graphs  map[string]*PlacementGraph // by track, built on first use
+	places  map[int64]*placementRun    // tests in progress, by user
 }
 
 var (
@@ -430,7 +435,7 @@ func known(st Memory) float64 {
 
 func (l *Lab) coverage(track string, mem map[string]Memory) float64 {
 	var w, total float64
-	for _, i := range l.c.Program[programOf(track)] {
+	for _, i := range l.c.Track[track] {
 		x := l.c.weight(i, track)
 		w += x * known(mem[i.Code])
 		total += x
@@ -472,7 +477,7 @@ func (l *Lab) Me(ctx context.Context, user int64, name, track string) (*Me, erro
 	}
 	now := time.Now().UTC()
 	me := &Me{User: name, Track: track, Ideas: []MemoryView{}}
-	program := l.c.Program[programOf(track)]
+	program := l.c.Track[track]
 	sched := l.c.schedulingIdeas(track)
 	me.Total = len(sched)
 	for _, i := range program {

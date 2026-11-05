@@ -311,3 +311,10 @@ input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border-radius: 
 .stack { display: grid; }
 .stack > * { grid-area: 1 / 1; }
 .stack > :not([data-on]) { visibility: hidden; }
+
+.placecard { display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 14px 16px; margin-bottom: 14px; border: 1px solid var(--accent); border-radius: 10px; background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.placecard p { margin: 4px 0 0; font-size: 13px; }
+.placecard .btn { flex: none; }
+.linkbtn { background: none; border: 0; padding: 10px 0 0; font: inherit; font-size: 12px; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+.linkbtn:hover { color: var(--fg); }
+@media (max-width: 560px) { .placecard { flex-direction: column; align-items: stretch; } }

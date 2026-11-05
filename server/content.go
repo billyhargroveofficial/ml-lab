@@ -66,6 +66,7 @@ type Content struct {
 	Program  map[string][]*Idea    // by program, in order
 	Graph    map[string]FIREIdea   // full graph incl. implicit edges, for propagation
 	Up       map[string][]FIREEdge // reverse edges: idea → ideas built on it
+	Track    map[string][]*Idea    // ideas of each track, in program order
 }
 
 func LoadContent(path string) (*Content, error) {
@@ -162,18 +163,49 @@ func LoadContent(path string) (*Content, error) {
 			c.Up[e.Code] = append(c.Up[e.Code], FIREEdge{Code: code, Key: e.Key, Encompassing: e.Encompassing})
 		}
 	}
+	c.buildTracks()
 	return c, nil
 }
 
-// Tracks: "all" is the ML program, "math" the math program.
-var tracks = map[string]bool{"all": true, "math": true}
+// gateWeight: in the "all" track an ML idea waits for the math topics it
+// encompasses with at least this weight, so math arrives just in time.
+const gateWeight = 0.5
 
-func programOf(track string) string {
-	if track == "math" {
-		return "math"
+// buildTracks: "math" is the whole math program; "all" is the ML program plus
+// only the math it stands on — math topics an ML idea encompasses and their
+// prerequisite closure.
+func (c *Content) buildTracks() {
+	need := map[string]bool{}
+	var walk func(code string)
+	walk = func(code string) {
+		if need[code] {
+			return
+		}
+		need[code] = true
+		for _, e := range c.Ideas[code].Edges {
+			if e.Kind == "prerequisite" {
+				walk(e.Code)
+			}
+		}
 	}
-	return "ml"
+	for _, i := range c.Program["ml"] {
+		for _, e := range i.Edges {
+			if e.Kind == "implicit" {
+				walk(e.Code)
+			}
+		}
+	}
+	all := []*Idea{}
+	for _, i := range c.Program["math"] {
+		if need[i.Code] {
+			all = append(all, i)
+		}
+	}
+	c.Track = map[string][]*Idea{"all": append(all, c.Program["ml"]...), "math": c.Program["math"]}
 }
+
+// Tracks: "all" is ML with the math it needs, "math" the whole math program.
+var tracks = map[string]bool{"all": true, "math": true}
 
 // weight orders lessons and weighs progress; it is the idea's own weight.
 func (c *Content) weight(i *Idea, _ string) float64 { return i.Weight }
@@ -182,7 +214,7 @@ func (c *Content) weight(i *Idea, _ string) float64 { return i.Weight }
 // prerequisites of the same program. Implicit cross-program edges never lock a
 // lesson; they only spread repetition credit (see Graph).
 func (c *Content) schedulingIdeas(track string) []FIREIdea {
-	ideas := c.Program[programOf(track)]
+	ideas := c.Track[track]
 	out := make([]FIREIdea, 0, len(ideas))
 	for _, i := range ideas {
 		if len(i.Questions) == 0 {
@@ -190,7 +222,7 @@ func (c *Content) schedulingIdeas(track string) []FIREIdea {
 		}
 		g := FIREIdea{Code: i.Code, ID: i.ID, Level: i.Level, Weight: c.weight(i, track)}
 		for _, e := range i.Edges {
-			if e.Kind == "prerequisite" {
+			if e.Kind == "prerequisite" || (track == "all" && e.Encompassing >= gateWeight) {
 				g.Prerequisites = append(g.Prerequisites, FIREEdge{Code: e.Code, Key: e.Key, Encompassing: e.Encompassing})
 			}
 		}

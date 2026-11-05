@@ -35,22 +35,24 @@ type scenario struct {
 	// generous, 0 — implicit repetition does not work at all.
 	Alpha float64
 	Cap   float64 // ImplicitCap; 1000 ≈ no guard
+	Place int     // what the learner knows before starting, settled by the placement test: 0 nothing, 1 school base, 2 school base + basic linear algebra and probability
 }
 
 type simResult struct {
-	Scenario                  scenario
-	DaysToFinish              int // 0 = not finished within the horizon
-	Learned, Total            int
-	Lessons, Reviews, Quizzes int
-	ReviewsPerDayLast30       float64
-	ReviewShare               float64 // share of the daily budget spent on reviews and quizzes
-	MaxBacklog                int
-	TrueRecallEnd, ReviewPass float64
-	WeakShare                 float64 // learned ideas whose real recall < 0.7 at the end
-	ImplicitCredits           int
-	MeanStabilityEnd          float64
-	LessonFails               int
-	DaysPerMonth              []int // learned ideas at day 30, 60, 90, ...
+	Scenario                    scenario
+	DaysToFinish                int // 0 = not finished within the horizon
+	Learned, Total              int
+	Probes, Placed, FalsePlaced int
+	Lessons, Reviews, Quizzes   int
+	ReviewsPerDayLast30         float64
+	ReviewShare                 float64 // share of the daily budget spent on reviews and quizzes
+	MaxBacklog                  int
+	TrueRecallEnd, ReviewPass   float64
+	WeakShare                   float64 // learned ideas whose real recall < 0.7 at the end
+	ImplicitCredits             int
+	MeanStabilityEnd            float64
+	LessonFails                 int
+	DaysPerMonth                []int // learned ideas at day 30, 60, 90, ...
 }
 
 func trueRecall(m Memory, k float64, now time.Time) float64 {
@@ -103,6 +105,30 @@ func simulate(c *Content, sc scenario, horizon int, seed int64) simResult {
 	review := func(code string, g Rating, now time.Time) {
 		mem[code] = mem[code].Review(g, now)
 		truth[code] = truth[code].Review(g, now)
+	}
+	if sc.Place > 0 {
+		knows := priorKnowledge(c, ideas, sc.Place)
+		for code := range knows {
+			truth[code] = Memory{Status: "learned", S: 60, D: 5, Reps: 1, LastReviewAt: start}
+		}
+		p := NewPlacement(NewPlacementGraph(ideas), nil)
+		for code := p.Next(); code != ""; code = p.Next() {
+			right := false
+			if knows[code] {
+				right = rng.Float64() < 0.9
+			} else {
+				right = rng.Float64() < 0.3*0.25 // "don't know" most of the time, else a guess
+			}
+			p.Record(code, right)
+		}
+		res.Probes = p.Probes
+		for code := range p.Known {
+			mem[code] = Placed(code, p.Direct[code], start)
+			res.Placed++
+			if !knows[code] {
+				res.FalsePlaced++
+			}
+		}
 	}
 	for d := 0; d < horizon; d++ {
 		now := start.Add(time.Duration(d) * day)
@@ -259,6 +285,33 @@ func simulate(c *Content, sc scenario, horizon int, seed int64) simResult {
 	return res
 }
 
+// priorKnowledge: the ideas a learner knows before starting — a section or
+// level band together with everything below it in the track graph, so the
+// knowledge is downward closed as a real learner's roughly is.
+func priorKnowledge(c *Content, ideas []FIREIdea, level int) map[string]bool {
+	section := map[string]string{}
+	for _, s := range c.Sections["math"] {
+		for _, t := range s.Topics {
+			for _, code := range t.Ideas {
+				section[code] = s.Name
+			}
+		}
+	}
+	g := NewPlacementGraph(ideas)
+	knows := map[string]bool{}
+	for n, i := range ideas {
+		sec := section[i.Code]
+		if strings.HasPrefix(sec, "Школьная") || (level >= 2 && i.Level == 1 && (sec == "Линейная алгебра" || sec == "Вероятность и статистика")) {
+			for j, code := range g.Codes {
+				if g.below[n].has(j) {
+					knows[code] = true
+				}
+			}
+		}
+	}
+	return knows
+}
+
 func TestSimulate(t *testing.T) {
 	if os.Getenv("SIM") == "" {
 		t.Skip("set SIM=1 to run the learning simulator")
@@ -271,41 +324,34 @@ func TestSimulate(t *testing.T) {
 	average := learner{"средний", 0.82, 1.0}
 	weak := learner{"слабый", 0.68, 0.6}
 	var scs []scenario
-	caps := []float64{1000, 2, 3, 5}
-	if os.Getenv("SIM_FULL") != "" {
-		caps = []float64{5}
+	for _, g := range []int{40, 80, 120} {
+		scs = append(scs, scenario{Program: "all", Goal: g, L: average, Alpha: 1, Cap: 5})
 	}
-	for _, p := range []string{"all", "math"} {
-		for _, cp := range caps {
-			for _, a := range []float64{1, 0.5, 0} {
-				scs = append(scs, scenario{p, 40, average, false, a, cp})
-			}
-			scs = append(scs, scenario{p, 40, weak, false, 1, cp})
-		}
-		if os.Getenv("SIM_FULL") != "" {
-			for _, g := range []int{20, 80} {
-				for _, l := range []learner{strong, average, weak} {
-					scs = append(scs, scenario{p, g, l, false, 1, 5})
-				}
-			}
-			scs = append(scs, scenario{p, 40, strong, false, 1, 5}, scenario{p, 40, average, true, 0, 5})
-		}
-	}
-	horizon := 720
+	scs = append(scs,
+		scenario{Program: "all", Goal: 120, L: strong, Alpha: 1, Cap: 5},
+		scenario{Program: "all", Goal: 120, L: weak, Alpha: 1, Cap: 5},
+		scenario{Program: "all", Goal: 120, L: average, Alpha: 0.5, Cap: 5},
+		scenario{Program: "all", Goal: 120, L: average, Alpha: 1, Cap: 5, Place: 1},
+		scenario{Program: "all", Goal: 120, L: average, Alpha: 1, Cap: 5, Place: 2},
+		scenario{Program: "all", Goal: 120, L: weak, Alpha: 1, Cap: 5, Place: 2},
+		scenario{Program: "math", Goal: 120, L: average, Alpha: 1, Cap: 5},
+		scenario{Program: "math", Goal: 120, L: average, Alpha: 1, Cap: 5, Place: 2},
+	)
+	horizon := 540
 	var b strings.Builder
-	fmt.Fprintf(&b, "program\tgoal\tlearner\tFIRe\tfinish_day\tlearned\tlessons\tfails\treviews\tquizzes\treviews/day(last30)\treview_share\tmax_backlog\ttrue_recall_end\tweak_share\treview_pass\timplicit\tmeanS\tby_month\n")
+	fmt.Fprintf(&b, "probes/placed/false\tprogram\tgoal\tlearner\tFIRe\tfinish_day\tlearned\tlessons\tfails\treviews\tquizzes\treviews/day(last30)\treview_share\tmax_backlog\ttrue_recall_end\tweak_share\treview_pass\timplicit\tmeanS\tby_month\n")
 	for _, sc := range scs {
 		var rs []simResult
 		for seed := int64(1); seed <= 3; seed++ {
 			rs = append(rs, simulate(c, sc, horizon, seed))
 		}
 		r := average3(rs)
-		fire := fmt.Sprintf("on a=%.1f cap=%g", sc.Alpha, sc.Cap)
+		fire := fmt.Sprintf("a=%.1f place=%d", sc.Alpha, sc.Place)
 		if sc.NoFIRe {
 			fire = "off"
 		}
-		fmt.Fprintf(&b, "%s\t%d\t%s\t%s\t%d\t%d/%d\t%d\t%d\t%d\t%d\t%.1f\t%.0f%%\t%d\t%.2f\t%.0f%%\t%.2f\t%d\t%.0f\t%v\n",
-			sc.Program, sc.Goal, sc.L.Name, fire, r.DaysToFinish, r.Learned, r.Total, r.Lessons, r.LessonFails, r.Reviews, r.Quizzes,
+		fmt.Fprintf(&b, "%d/%d/%d\t%s\t%d\t%s\t%s\t%d\t%d/%d\t%d\t%d\t%d\t%d\t%.1f\t%.0f%%\t%d\t%.2f\t%.0f%%\t%.2f\t%d\t%.0f\t%v\n",
+			r.Probes, r.Placed, r.FalsePlaced, sc.Program, sc.Goal, sc.L.Name, fire, r.DaysToFinish, r.Learned, r.Total, r.Lessons, r.LessonFails, r.Reviews, r.Quizzes,
 			r.ReviewsPerDayLast30, r.ReviewShare*100, r.MaxBacklog, r.TrueRecallEnd, r.WeakShare*100, r.ReviewPass, r.ImplicitCredits, r.MeanStabilityEnd, r.DaysPerMonth)
 	}
 	out := os.Getenv("SIM_OUT")
@@ -344,6 +390,9 @@ func average3(rs []simResult) simResult {
 		r.DaysToFinish = 0
 	}
 	r.Learned = avgI(func(x simResult) int { return x.Learned })
+	r.Probes = avgI(func(x simResult) int { return x.Probes })
+	r.Placed = avgI(func(x simResult) int { return x.Placed })
+	r.FalsePlaced = avgI(func(x simResult) int { return x.FalsePlaced })
 	r.Lessons = avgI(func(x simResult) int { return x.Lessons })
 	r.LessonFails = avgI(func(x simResult) int { return x.LessonFails })
 	r.Reviews = avgI(func(x simResult) int { return x.Reviews })

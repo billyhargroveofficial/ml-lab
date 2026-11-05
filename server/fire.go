@@ -492,10 +492,12 @@ func Estimate(ideas []FIREIdea, mem map[string]Memory, passRate, pace float64, n
 			remaining += float64(3+3*idea.Level) / passRate
 			reps = 1
 		}
-		remaining += 3 * math.Max(0, 4-reps) / passRate
+		// Explicit reviews until the idea runs on implicit credit, calibrated on
+		// the learning simulator (server/sim_test.go): about 2.4 per idea.
+		remaining += 3 * math.Max(0, 2.4-reps) / passRate
 	}
 	remaining += remaining / 150 * 15 * 0.25
-	days := remaining / (pace * math.Pow(pace/40, 0.1))
+	days := remaining / pace
 	return FIREForecast{remaining, pace, days, now.Add(time.Duration(days * float64(day)))}
 }
 

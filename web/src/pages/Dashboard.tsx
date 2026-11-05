@@ -3,6 +3,7 @@ import { useApi, type HistoryItem, type Leader, type Me, type Program, type Task
 import { Link, useSession } from '../App';
 import { Auth } from '../ui/Auth';
 import { Session } from '../ui/Session';
+import { Placement } from '../ui/Placement';
 import { fmt, LineChart, Ring } from '../ui/charts';
 import { AnimatePresence, Grow, motion, Num, Panel, Seg, soft, spring } from '../ui/motion';
 import { lessons, setPin } from '../ui/Pin';
@@ -12,15 +13,16 @@ const DAY = 864e5;
 const plural = (n: number, one: string, few: string, many: string) => { const a = n % 10, b = n % 100; return a === 1 && b !== 11 ? one : a >= 2 && a <= 4 && (b < 12 || b > 14) ? few : many; };
 const longDate = (d: Date) => d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' }).replace(' г.', '');
 const store = { get: (k: string, d: string) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } }, set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* convenience only */ } } };
-const etaDays = (remaining: number, pace: number) => remaining / (pace * Math.pow(pace / 40, 0.1));
+const etaDays = (remaining: number, pace: number) => remaining / pace;
 const icon: Record<Task['kind'], string> = { lesson: '+', review: '↻', quiz: '?' };
 const kindText: Record<Task['kind'], string> = { lesson: 'урок', review: 'повторение', quiz: 'проверка' };
 
 export function Dashboard() {
   const { me: session, guest, loading } = useSession();
   const [program, setProgramState] = useState<Prog>(() => (new URLSearchParams(location.search).get('program') ?? store.get('program', 'ml')) === 'math' ? 'math' : 'ml');
-  const [goal, setGoalState] = useState(() => Number(store.get('goal', '40')) || 40);
+  const [goal, setGoalState] = useState(() => Number(store.get('goal', '60')) || 60);
   const [task, setTask] = useState<{ kind: Task['kind']; code?: string; n: number }>();
+  const [placing, setPlacing] = useState(false);
   const setProgram = (p: Prog) => { setProgramState(p); store.set('program', p); };
   const setGoal = (g: number) => { setGoalState(g); store.set('goal', String(g)); };
   const track = program === 'math' ? 'math' : 'all';
@@ -42,12 +44,12 @@ export function Dashboard() {
       <div>
         <motion.h1 initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={soft}>ML Lab<motion.span animate={{ opacity: [1, 0, 1] }} transition={{ duration: 1.1, repeat: Infinity, ease: 'linear' }}>_</motion.span></motion.h1>
         <div className="stack">
-          <motion.p animate={{ opacity: program === 'ml' ? 1 : 0, y: program === 'ml' ? 0 : -4 }} transition={soft} data-on={program === 'ml' || undefined}>427 идей машинного обучения: уроки, повторения и проверки. Интервальное повторение FIRe: решая сложное, повторяешь простое.</motion.p>
-          <motion.p animate={{ opacity: program === 'math' ? 1 : 0, y: program === 'math' ? 0 : 4 }} transition={soft} data-on={program === 'math' || undefined}>Математика для ML: анализ, линейная алгебра, вероятность и оптимизация. Каждая ML-идея неявно повторяет математику, на которой стоит.</motion.p>
+          <motion.p animate={{ opacity: program === 'ml' ? 1 : 0, y: program === 'ml' ? 0 : -4 }} transition={soft} data-on={program === 'ml' || undefined}>427 идей машинного обучения и 634 темы математики, на которых они стоят. Математика приходит прямо перед идеей, которой нужна; решая сложное, повторяешь простое.</motion.p>
+          <motion.p animate={{ opacity: program === 'math' ? 1 : 0, y: program === 'math' ? 0 : 4 }} transition={soft} data-on={program === 'math' || undefined}>Только математика — 634 темы, на которых стоит ML: функции и анализ, линейная алгебра, вероятность, статистика и оптимизация. Ничего сверх того, что нужно.</motion.p>
         </div>
       </div>
       <div className="controls">
-        <Seg big label="Программа" value={program} items={[['ml', 'ML теория'], ['math', 'ML математика']]} onChange={setProgram} />
+        <Seg big label="Программа" value={program} items={[['ml', 'ML + математика'], ['math', 'только математика']]} onChange={setProgram} />
       </div>
     </section>
 
@@ -67,12 +69,20 @@ export function Dashboard() {
           {guest && !loading ? <div className="intro">
             <ul>
               <li><b>{fmt(427, 0)} ML-идей</b> — у каждой урок и 3–6 вопросов с разбором.</li>
-              <li><b>{fmt(1293, 0)} темы математики</b> — от производных до SVD, оптимизации и статистики.</li>
+              <li><b>{fmt(634, 0)} темы математики</b> — только те, на которых стоит ML: от производных до SVD, оптимизации и статистики.</li>
+              <li><b>Вступительный тест</b> отметит то, что вы уже знаете, — программа станет короче.</li>
               <li><b>FIRe</b>: составные задачи засчитывают повторение мелких — меньше повторений, тот же результат.</li>
               <li>XP, дневная цель, серия дней и дата, к которой вы пройдёте программу.</li>
             </ul>
             <Auth />
-          </div> : <Feed tasks={next.data} loading={!next.data} onOpen={t => setTask({ kind: t.kind, code: t.code, n: Date.now() })} done={!!m && m.learned >= m.total} />}
+          </div> : <>
+            {m && m.learned < m.total * 0.05 && <motion.div className="placecard" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={soft}>
+              <div><b>Уже знаете часть математики?</b><p className="muted">Вступительный тест — до 48 вопросов, минут 15. Отметит, что вы уже знаете, и программа станет короче.</p></div>
+              <button className="btn primary" onClick={() => setPlacing(true)}>пройти тест</button>
+            </motion.div>}
+            <Feed tasks={next.data} loading={!next.data} onOpen={t => setTask({ kind: t.kind, code: t.code, n: Date.now() })} done={!!m && m.learned >= m.total} />
+            {m && m.learned >= m.total * 0.05 && <button className="linkbtn muted" onClick={() => setPlacing(true)}>вступительный тест ↗</button>}
+          </>}
         </Panel>
         {authed && <Panel order={2} aria-label="История"><div className="phead"><h2>История</h2><span>последние задания</span></div><History items={history.data} /></Panel>}
       </div>
@@ -86,6 +96,7 @@ export function Dashboard() {
         </Panel>
       </aside>
     </div>
+    <AnimatePresence>{placing && <Placement key="placement" track={track} onClose={() => setPlacing(false)} />}</AnimatePresence>
     <AnimatePresence>{task && <Session key={task.n} kind={task.kind} code={task.code} onClose={() => setTask(undefined)} onNext={openNext} />}</AnimatePresence>
   </div>;
 }

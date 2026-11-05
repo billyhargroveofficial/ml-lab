@@ -219,3 +219,30 @@ func migrateFSRS(db *sql.DB) error {
 	}
 	return nil
 }
+
+// Forget drops progress and goals on ideas the content no longer has (the
+// math program was cut to what ML stands on), so they do not linger.
+func (s *Store) Forget(known map[string]*Idea) (int, error) {
+	rows, err := s.db.Query(`SELECT DISTINCT code FROM memory UNION SELECT code FROM pins`)
+	if err != nil {
+		return 0, err
+	}
+	var gone []string
+	for rows.Next() {
+		var code string
+		_ = rows.Scan(&code)
+		if known[code] == nil {
+			gone = append(gone, code)
+		}
+	}
+	rows.Close()
+	for _, code := range gone {
+		if _, err := s.db.Exec(`DELETE FROM memory WHERE code=?`, code); err != nil {
+			return 0, err
+		}
+		if _, err := s.db.Exec(`DELETE FROM pins WHERE code=?`, code); err != nil {
+			return 0, err
+		}
+	}
+	return len(gone), nil
+}

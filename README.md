@@ -1,7 +1,7 @@
 # ML Lab
 
 Open trainer for machine learning and math: **427 ML ideas** from metrics and trees
-to transformers and LLMs, and **1293 math topics** from functions and calculus to SVD, convex
+to transformers and LLMs, and **634 math topics** (only the math the ML ideas stand on) from functions and calculus to SVD, convex
 optimisation and statistics. Every idea has a lesson and 3–6 multiple-choice
 questions. Memory is modelled with FSRS-6 (default parameters of
 [py-fsrs](https://github.com/open-spaced-repetition/py-fsrs), MIT; review when
