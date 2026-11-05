@@ -1,0 +1,9 @@
+node_modules/
+web/dist/
+bin/
+data/content.db
+data/users.db*
+*.log
+.DS_Store
+deploy.local/
+web/tsconfig.tsbuildinfo
