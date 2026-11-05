@@ -262,7 +262,7 @@ input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border-radius: 
 .tp-name { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
 .tp-name .btn.small { height: 22px; font-size: 11px; padding: 0 8px; }
 @media (max-width: 700px) { .tp { grid-template-columns: 1fr; gap: 6px; } }
-.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-start; align-content: flex-start; }
 .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 4px; text-decoration: none; background: var(--bg); max-width: 100%; }
 .chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip[data-s="learned"] { border-color: var(--good); background: var(--good-soft); }
