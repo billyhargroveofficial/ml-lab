@@ -12,7 +12,7 @@ import { GraphPage } from './pages/Graph';
 const ROOT = '/ml';
 const current = () => decodeURIComponent(location.pathname.replace(/^\/ml/, '') || '/');
 let setPathGlobal: (p: string) => void = () => {};
-export function go(to: string) { history.pushState(null, '', ROOT + to); setPathGlobal(to); window.scrollTo(0, 0); }
+export function go(to: string) { history.pushState(null, '', ROOT + to); setPathGlobal(to.split(/[?#]/)[0]); window.scrollTo(0, 0); }
 export function Link({ to, children, ...rest }: { to: string; children: ReactNode } & Omit<AnchorHTMLAttributes<HTMLAnchorElement>, 'href'> & { 'data-s'?: string }) {
   return <a href={ROOT + to} {...rest} onClick={(e: MouseEvent) => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.button) return; e.preventDefault(); go(to); }}>{children}</a>;
 }

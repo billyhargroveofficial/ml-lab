@@ -27,7 +27,7 @@ export function IdeaPage({ code }: { code: string }) {
   document.title = `${i.name} · ML Lab`;
   return <div className="wrap page">
     <div className="page-head"><div>
-      <p className="muted" style={{ margin: '0 0 6px', fontSize: 12 }}><Link to={`/program?program=${i.program}`}>{i.program === 'ml' ? 'ML теория' : 'ML математика'}</Link>{section && ` / ${section.name}`}{topic && ` / ${topic.name}`}</p>
+      <p className="muted" style={{ margin: '0 0 6px', fontSize: 12 }}><Link to={`/program?program=${i.program}`}>{i.program === 'ml' ? 'ML' : 'Математика'}</Link>{section && ` / ${section.name}`}{topic && ` / ${topic.name}`}</p>
       <h1>{i.name}</h1>
       {i.definition && <p className="muted" style={{ margin: '8px 0 0', maxWidth: '75ch' }}>{i.definition}</p>}
     </div><div style={{ display: 'grid', gap: 8, justifyItems: 'end' }}><span style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}><PinButton code={i.code} label="↑ этот урок первым" /><PinButton code={i.topic_id} label="↑ всю тему первой" compact /></span><span className="tag">уровень {i.level} · <code>{i.code}</code></span></div></div>
